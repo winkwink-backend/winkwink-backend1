@@ -104,4 +104,33 @@ app.get("/keys/:userId", async (req, res) => {
 // AVVIO SERVER
 // ------------------------------------------------------------
 const PORT = process.env.PORT || 10000;
+// ------------------------------------------------------------
+// 4️⃣ CHECK SE UN UTENTE ESISTE (per ContactsPage)
+// ------------------------------------------------------------
+app.get("/users/check", async (req, res) => {
+  const phone = req.query.phone;
+
+  if (!phone) {
+    return res.status(400).json({ error: "Missing phone" });
+  }
+
+  try {
+    const result = await pool.query(
+      "SELECT id FROM users WHERE phone = $1",
+      [phone]
+    );
+
+    if (result.rows.length > 0) {
+      return res.json({
+        exists: true,
+        userId: result.rows[0].id
+      });
+    }
+
+    return res.json({ exists: false });
+  } catch (err) {
+    console.error("Errore /users/check:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
 app.listen(PORT, () => console.log(`Server attivo su porta ${PORT}`));
