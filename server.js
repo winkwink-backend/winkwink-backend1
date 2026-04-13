@@ -1,83 +1,107 @@
 import express from "express";
-import multer from "multer";
 import cors from "cors";
-import { exec } from "child_process";
-import fs from "fs";
+import pkg from "pg";
+
+const { Pool } = pkg;
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const upload = multer({ dest: "uploads/" });
+// 🔥 Connessione a PostgreSQL
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
 // ------------------------------------------------------------
-// ENCODE: riceve frame + audio e crea il video stego
+// 1️⃣ LOGIN / REGISTRAZIONE UTENTE
 // ------------------------------------------------------------
-app.post("/encode", upload.array("files"), async (req, res) => {
+app.post("/login", async (req, res) => {
+  const { phone, publicKey } = req.body;
+
+  if (!phone || !publicKey) {
+    return res.status(400).json({ error: "Missing phone or publicKey" });
+  }
+
   try {
-    const audio = req.files.find(f => f.originalname.endsWith(".mp3"));
-    const frames = req.files.filter(f => f !== audio);
+    // Cerca utente esistente
+    const existing = await pool.query(
+      "SELECT * FROM users WHERE phone = $1",
+      [phone]
+    );
 
-    if (!audio || frames.length === 0) {
-      return res.status(400).json({ error: "Missing frames or audio" });
+    if (existing.rows.length > 0) {
+      // Aggiorna la chiave pubblica
+      await pool.query(
+        "UPDATE users SET public_key = $1 WHERE phone = $2",
+        [publicKey, phone]
+      );
+
+      return res.json({ success: true });
     }
 
-    const framesDir = `frames_${Date.now()}`;
-    fs.mkdirSync(framesDir);
+    // Crea nuovo utente
+    await pool.query(
+      "INSERT INTO users (phone, public_key) VALUES ($1, $2)",
+      [phone, publicKey]
+    );
 
-    frames.forEach((f, i) => {
-      fs.renameSync(f.path, `${framesDir}/frame_${String(i).padStart(5, "0")}.png`);
-    });
-
-    const output = `output_${Date.now()}.mp4`;
-
-    const cmd = `
-      ffmpeg -y -framerate 30 -i ${framesDir}/frame_%05d.png \
-      -i ${audio.path} -c:v libx264 -pix_fmt yuv420p -c:a aac ${output}
-    `;
-
-    exec(cmd, (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-
-      res.download(output, () => {
-        fs.rmSync(framesDir, { recursive: true, force: true });
-        fs.unlinkSync(audio.path);
-        fs.unlinkSync(output);
-      });
-    });
-
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("Errore /login:", err);
+    return res.status(500).json({ error: "Server error" });
   }
 });
 
 // ------------------------------------------------------------
-// EXTRACT: riceve un video e restituisce i frame
+// 2️⃣ REGISTRAZIONE CHIAVE PUBBLICA
 // ------------------------------------------------------------
-app.post("/extract", upload.single("video"), async (req, res) => {
+app.post("/keys/register", async (req, res) => {
+  const { user_id, public_key } = req.body;
+
+  if (!user_id || !public_key) {
+    return res.status(400).json({ error: "Missing user_id or public_key" });
+  }
+
   try {
-    const video = req.file.path;
-    const framesDir = `extract_${Date.now()}`;
-    fs.mkdirSync(framesDir);
+    await pool.query(
+      "UPDATE users SET public_key = $1 WHERE id = $2",
+      [public_key, user_id]
+    );
 
-    const cmd = `
-      ffmpeg -y -i ${video} ${framesDir}/frame_%05d.png
-    `;
-
-    exec(cmd, (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-
-      const files = fs.readdirSync(framesDir).map(f => `${framesDir}/${f}`);
-      res.json({ frames: files });
-
-      fs.unlinkSync(video);
-    });
-
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("Errore /keys/register:", err);
+    return res.status(500).json({ error: "Server error" });
   }
 });
 
-app.listen(10000, () => {
-  console.log("WinkWink backend running on port 10000");
+// ------------------------------------------------------------
+// 3️⃣ RECUPERO CHIAVE PUBBLICA
+// ------------------------------------------------------------
+app.get("/keys/:userId", async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const result = await pool.query(
+      "SELECT public_key FROM users WHERE id = $1",
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    return res.json({ public_key: result.rows[0].public_key });
+  } catch (err) {
+    console.error("Errore /keys/:userId:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
 });
+
+// ------------------------------------------------------------
+// AVVIO SERVER
+// ------------------------------------------------------------
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`Server attivo su porta ${PORT}`));
