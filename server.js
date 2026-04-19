@@ -672,7 +672,6 @@ app.post("/chat/create", async (req, res) => {
     if (!user1 || !user2)
       return res.status(400).json({ error: "Missing users" });
 
-    // Cerca chat esistente
     const existing = await client.query(
       `SELECT id FROM chats
        WHERE (user_a = $1 AND user_b = $2)
@@ -684,7 +683,6 @@ app.post("/chat/create", async (req, res) => {
     if (existing.rows.length > 0)
       return res.json({ chat_id: existing.rows[0].id });
 
-    // Crea nuova chat
     const result = await client.query(
       `INSERT INTO chats (user_a, user_b)
        VALUES ($1, $2)
@@ -695,9 +693,61 @@ app.post("/chat/create", async (req, res) => {
     return res.json({ chat_id: result.rows[0].id });
 
   } catch (err) {
+    console.error("ERRORE /chat/create:", err);
     return res.status(500).json({ error: err.message });
   }
 });
+
+// ------------------------------------------------------------
+// ⭐ CHAT — LISTA CHAT PER UN UTENTE (PATCH AGGIUNTA)
+// ------------------------------------------------------------
+app.get("/chat/list/:user_id", async (req, res) => {
+  try {
+    const { user_id } = req.params;
+
+    const result = await client.query(
+      `
+      SELECT 
+        c.id AS chat_id,
+        CASE 
+          WHEN c.user_a = $1 THEN c.user_b
+          ELSE c.user_a
+        END AS other_id,
+        u.name AS other_name,
+        (
+          SELECT content 
+          FROM chat_messages 
+          WHERE chat_id = c.id 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        ) AS last_message,
+        (
+          SELECT created_at 
+          FROM chat_messages 
+          WHERE chat_id = c.id 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        ) AS last_timestamp
+      FROM chats c
+      JOIN users u 
+        ON u.id = CASE 
+                    WHEN c.user_a = $1 THEN c.user_b
+                    ELSE c.user_a
+                  END
+      WHERE c.user_a = $1 OR c.user_b = $1
+      ORDER BY last_timestamp DESC NULLS LAST
+      `,
+      [user_id]
+    );
+
+    return res.json({ chats: result.rows });
+
+  } catch (err) {
+    console.error("ERRORE /chat/list:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ------------------------------------------------------------
 // CHAT — INVIA MESSAGGIO
 // ------------------------------------------------------------
@@ -721,6 +771,7 @@ app.post("/chat/send", async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
 // ------------------------------------------------------------
 // CHAT — LISTA MESSAGGI
 // ------------------------------------------------------------
@@ -741,7 +792,6 @@ app.get("/chat/messages/:chat_id", async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
-
 
 // ------------------------------------------------------------
 // VIDEOS
@@ -834,23 +884,76 @@ app.get("/users/check", async (req, res) => {
   console.log(">>> /users/check CARICATO <<<");
 
   try {
-    const phone = req.query.phone;
+    let phone = req.query.phone;
 
     if (!phone)
       return res.status(400).json({ error: "Phone required" });
 
+    phone = decodeURIComponent(phone);
+    phone = phone.replace(/\s+/g, "");
+    phone = phone.replace(/^\+/, "");
+
+    if (!phone.startsWith("39")) {
+      phone = "39" + phone;
+    }
+
+    phone = "+" + phone;
+
+    console.log("PHONE NORMALIZZATO:", phone);
+
     const result = await client.query(
-      "SELECT id FROM users WHERE phone = $1",
+      "SELECT id, public_key FROM users WHERE phone = $1",
       [phone]
     );
 
-    return res.json({ exists: result.rows.length > 0 });
+    if (result.rows.length === 0) {
+      return res.json({ exists: false });
+    }
+
+    return res.json({
+      exists: true,
+      userId: result.rows[0].id,
+      publicKey: result.rows[0].public_key
+    });
 
   } catch (err) {
     console.error("CHECK ERROR:", err);
     return res.status(500).json({ error: "Server error" });
   }
 });
+
+// ------------------------------------------------------------
+// CONTACTS — CHECK WHICH PHONES ARE WINKWINK USERS
+// ------------------------------------------------------------
+app.post("/contacts/check", async (req, res) => {
+  try {
+    let { phones } = req.body;
+
+    if (!phones || !Array.isArray(phones)) {
+      return res.status(400).json({ error: "phones array required" });
+    }
+
+    phones = phones.map(p =>
+      p.replace(/\s+/g, "").replace(/^\+/, "")
+    );
+
+    const result = await client.query(
+      `
+      SELECT id, phone, public_key
+      FROM users
+      WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
+      `,
+      [phones]
+    );
+
+    return res.json({ users: result.rows });
+
+  } catch (err) {
+    console.error("CONTACTS CHECK ERROR:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
 
 // ------------------------------------------------------------
 // ROOT + SERVER START
