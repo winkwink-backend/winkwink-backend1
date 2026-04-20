@@ -1050,12 +1050,10 @@ app.post("/contacts/sync", async (req, res) => {
     });
 
   } catch (err) {
-    console.error("CONTACTS SYNC ERROR:", err);
-    return res.status(500).json({ error: "Server error" });
-  }
-});
-
-});
+        console.error("CONTACTS SYNC ERROR:", err);
+        return res.status(500).json({ error: "Server error" });
+    }
+}); // Questa chiude app.post("/contacts/sync")
 
 // ------------------------------------------------------------
 // ROOT + SERVER START
@@ -1063,9 +1061,9 @@ app.post("/contacts/sync", async (req, res) => {
 const PORT = process.env.PORT || 10000;
 
 app.get("/", (req, res) => {
-  res.send("Backend WinkWink attivo");
+    res.send("Backend WinkWink attivo");
 });
 
 app.listen(PORT, () => {
-  console.log(`Server attivo su porta ${PORT}`);
+    console.log(`Server attivo su porta ${PORT}`);
 });
