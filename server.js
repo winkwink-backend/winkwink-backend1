@@ -953,7 +953,98 @@ app.post("/contacts/check", async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+// ------------------------------------------------------------
+// CONTACTS — SYNC COMPLETO (per WinkWink)
+// ------------------------------------------------------------
+app.post("/contacts/sync", async (req, res) => {
+  try {
+    let { phones } = req.body;
 
+    if (!phones || !Array.isArray(phones)) {
+      return res.status(400).json({ error: "phones array required" });
+    }
+
+    // Normalizzazione numeri
+    phones = phones.map(p =>
+      p.replace(/\s+/g, "").replace(/^\+/, "")
+    );
+
+    // 1️⃣ Trova utenti WinkWink
+    const wwResult = await client.query(
+      `
+      SELECT id, phone, public_key, name
+      FROM users
+      WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
+      `,
+      [phones]
+    );
+
+    const wwContacts = wwResult.rows.map(u => ({
+      userId: u.id.toString(),
+      name: u.name || "Utente",
+      lastName: "",
+      phone: u.phone,
+      publicKey: u.public_key
+    }));
+
+    // 2️⃣ Chat dell’utente corrente (se esiste)
+    let chats = [];
+    let currentUser = null;
+
+    if (wwContacts.length > 0) {
+      const myPhone = "+" + phones[0]; // primo numero = utente corrente
+      const me = await client.query(
+        "SELECT * FROM users WHERE phone = $1",
+        [myPhone]
+      );
+
+      if (me.rows.length > 0) {
+        currentUser = me.rows[0];
+
+        const chatResult = await client.query(
+          `
+          SELECT
+            c.id AS chat_id,
+            CASE
+              WHEN c.user_a = $1 THEN c.user_b
+              ELSE c.user_a
+            END AS other_id,
+            u.name AS other_name,
+            (
+              SELECT content
+              FROM chat_messages
+              WHERE chat_id = c.id
+              ORDER BY created_at DESC
+              LIMIT 1
+            ) AS last_message
+          FROM chats c
+          JOIN users u
+          ON u.id = CASE
+            WHEN c.user_a = $1 THEN c.user_b
+            ELSE c.user_a
+          END
+          WHERE c.user_a = $1 OR c.user_b = $1
+          `,
+          [currentUser.id]
+        );
+
+        chats = chatResult.rows;
+      }
+    }
+
+    // 3️⃣ Risposta completa
+    return res.json({
+      all_contacts: phones.map(p => ({ phone: "+" + p, name: "" })),
+      ww_contacts: wwContacts,
+      chats,
+      current_user: currentUser
+    });
+
+  } catch (err) {
+    console.error("CONTACTS SYNC ERROR:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
 
 // ------------------------------------------------------------
 // ROOT + SERVER START
