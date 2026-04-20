@@ -971,20 +971,20 @@ app.post("/contacts/sync", async (req, res) => {
 
     // 1️⃣ Trova utenti WinkWink
     const wwResult = await client.query(
-      `
-      SELECT id, phone, public_key, name
-      FROM users
-      WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
-      `,
-      [phones]
+    `
+    SELECT id, phone, public_key
+    FROM users
+    WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
+    `,
+    [phones]
     );
 
     const wwContacts = wwResult.rows.map(u => ({
-      userId: u.id.toString(),
-      name: u.name || "Utente",
-      lastName: "",
-      phone: u.phone,
-      publicKey: u.public_key
+    userId: u.id.toString(),
+    name: "Utente",   // placeholder perché non hai la colonna name
+    lastName: "",
+    phone: u.phone,
+    publicKey: u.public_key
     }));
 
     // 2️⃣ Chat dell’utente corrente (se esiste)
