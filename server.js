@@ -443,9 +443,9 @@ app.post("/p2p/chat/offer", async (req, res) => {
 
     await client.query(
       `
-      INSERT INTO p2p_chat (user_a, user_b, offer)
+      INSERT INTO p2p_chat (user1, user2, offer)
       VALUES ($1, $2, $3)
-      ON CONFLICT (user_a, user_b)
+      ON CONFLICT (user1, user2)
       DO UPDATE SET offer = EXCLUDED.offer, answer = NULL, candidates = '[]'::jsonb, updated_at = NOW()
       `,
       [from_user_id, to_user_id, offer]
@@ -466,7 +466,7 @@ app.get("/p2p/chat/offer", async (req, res) => {
     const result = await client.query(
       `
       SELECT offer FROM p2p_chat
-      WHERE user_a = $1 AND user_b = $2
+      WHERE user1 = $1 AND user2 = $2
       `,
       [other_user_id, my_user_id]
     );
@@ -490,7 +490,7 @@ app.post("/p2p/chat/answer", async (req, res) => {
       `
       UPDATE p2p_chat
       SET answer = $1, updated_at = NOW()
-      WHERE user_a = $2 AND user_b = $3
+      WHERE user1 = $2 AND user2 = $3
       `,
       [answer, to_user_id, from_user_id]
     );
@@ -511,7 +511,7 @@ app.post("/p2p/chat/candidate", async (req, res) => {
       `
       UPDATE p2p_chat
       SET candidates = candidates || $1::jsonb, updated_at = NOW()
-      WHERE user_a = $2 AND user_b = $3
+      WHERE user1 = $2 AND user2 = $3
       `,
       [JSON.stringify([candidate]), from_user_id, to_user_id]
     );
@@ -531,7 +531,7 @@ app.get("/p2p/chat/candidates", async (req, res) => {
     const result = await client.query(
       `
       SELECT candidates FROM p2p_chat
-      WHERE user_a = $1 AND user_b = $2
+      WHERE user1 = $1 AND user2 = $2
       `,
       [other_user_id, my_user_id]
     );
@@ -665,42 +665,6 @@ app.delete("/delete-message/:id", async (req, res) => {
 // ------------------------------------------------------------
 // CHAT — CREA O RECUPERA CHAT TRA DUE UTENTI
 // ------------------------------------------------------------
-app.post("/chat/create", async (req, res) => {
-  try {
-    const { user1, user2 } = req.body;
-
-    if (!user1 || !user2)
-      return res.status(400).json({ error: "Missing users" });
-
-    const existing = await client.query(
-      `SELECT id FROM chats
-       WHERE (user_a = $1 AND user_b = $2)
-       OR   (user_a = $2 AND user_b = $1)
-       LIMIT 1`,
-      [user1, user2]
-    );
-
-    if (existing.rows.length > 0)
-      return res.json({ chat_id: existing.rows[0].id });
-
-    const result = await client.query(
-      `INSERT INTO chats (user_a, user_b)
-       VALUES ($1, $2)
-       RETURNING id`,
-      [user1, user2]
-    );
-
-    return res.json({ chat_id: result.rows[0].id });
-
-  } catch (err) {
-    console.error("ERRORE /chat/create:", err);
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// ------------------------------------------------------------
-// ⭐ CHAT — LISTA CHAT PER UN UTENTE (PATCH AGGIUNTA)
-// ------------------------------------------------------------
 app.get("/chat/list/:user_id", async (req, res) => {
   try {
     const { user_id } = req.params;
@@ -710,8 +674,8 @@ app.get("/chat/list/:user_id", async (req, res) => {
       SELECT 
         c.id AS chat_id,
         CASE 
-          WHEN c.user_a = $1 THEN c.user_b
-          ELSE c.user_a
+          WHEN c.user1 = $1 THEN c.user2
+          ELSE c.user1
         END AS other_id,
         u.name AS other_name,
         (
@@ -731,10 +695,62 @@ app.get("/chat/list/:user_id", async (req, res) => {
       FROM chats c
       JOIN users u 
         ON u.id = CASE 
-                    WHEN c.user_a = $1 THEN c.user_b
-                    ELSE c.user_a
+                    WHEN c.user1 = $1 THEN c.user2
+                    ELSE c.user1
                   END
-      WHERE c.user_a = $1 OR c.user_b = $1
+      WHERE c.user1 = $1 OR c.user2 = $1
+      ORDER BY last_timestamp DESC NULLS LAST
+      `,
+      [user_id]
+    );
+
+    return res.json({ chats: result.rows });
+
+  } catch (err) {
+    console.error("ERRORE /chat/list:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+// ------------------------------------------------------------
+// ⭐ CHAT — LISTA CHAT PER UN UTENTE (PATCH AGGIUNTA)
+// ------------------------------------------------------------
+app.get("/chat/list/:user_id", async (req, res) => {
+  try {
+    const { user_id } = req.params;
+
+    const result = await client.query(
+      `
+      SELECT 
+        c.id AS chat_id,
+        CASE 
+          WHEN c.user1 = $1 THEN c.user2
+          ELSE c.user1
+        END AS other_id,
+        u.name AS other_name,
+        (
+          SELECT content 
+          FROM chat_messages 
+          WHERE chat_id = c.id 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        ) AS last_message,
+        (
+          SELECT created_at 
+          FROM chat_messages 
+          WHERE chat_id = c.id 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        ) AS last_timestamp
+      FROM chats c
+      JOIN users u 
+        ON u.id = CASE 
+                    WHEN c.user1 = $1 THEN c.user2
+                    ELSE c.user1
+                  END
+      WHERE c.user1 = $1 OR c.user2 = $1
       ORDER BY last_timestamp DESC NULLS LAST
       `,
       [user_id]
@@ -958,11 +974,13 @@ app.post("/contacts/check", async (req, res) => {
 // ------------------------------------------------------------
 app.post("/contacts/sync", async (req, res) => {
   try {
-    let { phones } = req.body;
+    let { phones, userId } = req.body;
 
-    if (!phones || !Array.isArray(phones)) {
+    if (!phones || !Array.isArray(phones))
       return res.status(400).json({ error: "phones array required" });
-    }
+
+    if (!userId)
+      return res.status(400).json({ error: "userId required" });
 
     // Normalizzazione numeri
     phones = phones.map(p =>
@@ -971,79 +989,72 @@ app.post("/contacts/sync", async (req, res) => {
 
     // 1️⃣ Trova utenti WinkWink
     const wwResult = await client.query(
-    `
-    SELECT id, phone, public_key
-    FROM users
-    WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
-    `,
-    [phones]
+      `
+      SELECT
+        id AS "userId",
+        name,
+        last_name AS "lastName",
+        phone,
+        public_key AS "publicKey",
+        qr_data AS "qrData",
+        peer_id AS "peerId",
+        fingerprint,
+        version
+      FROM users
+      WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
+      `,
+      [phones]
     );
 
-    const wwContacts = wwResult.rows.map(u => ({
-    userId: u.id.toString(),
-    name: "Utente",   // placeholder perché non hai la colonna name
-    lastName: "",
-    phone: u.phone,
-    publicKey: u.public_key
+    const wwContacts = wwResult.rows;
+
+    // 2️⃣ Chat dell’utente loggato
+    const chatResult = await client.query(
+      `
+      SELECT
+        c.id AS chat_id,
+        CASE
+          WHEN c.user1 = $1 THEN c.user2
+          ELSE c.user1
+        END AS other_id,
+        u.name AS other_name,
+        (
+          SELECT content
+          FROM chat_messages
+          WHERE chat_id = c.id
+          ORDER BY created_at DESC
+          LIMIT 1
+        ) AS last_message
+      FROM chats c
+      JOIN users u
+        ON u.id = CASE
+                    WHEN c.user1 = $1 THEN c.user2
+                    ELSE c.user1
+                  END
+      WHERE c.user1= $1 OR c.user2 = $1
+      `,
+      [userId]
+    );
+
+    // 3️⃣ Contatti non-WW con nome originale
+    const allContacts = phones.map(p => ({
+      phone: "+" + p,
+      name: req.body.originalNames?.[p] ?? ""   // ⭐ nome vero
     }));
 
-    // 2️⃣ Chat dell’utente corrente (se esiste)
-    let chats = [];
-    let currentUser = null;
-
-    if (wwContacts.length > 0) {
-      const myPhone = "+" + phones[0]; // primo numero = utente corrente
-      const me = await client.query(
-        "SELECT * FROM users WHERE phone = $1",
-        [myPhone]
-      );
-
-      if (me.rows.length > 0) {
-        currentUser = me.rows[0];
-
-        const chatResult = await client.query(
-          `
-          SELECT
-            c.id AS chat_id,
-            CASE
-              WHEN c.user_a = $1 THEN c.user_b
-              ELSE c.user_a
-            END AS other_id,
-            u.name AS other_name,
-            (
-              SELECT content
-              FROM chat_messages
-              WHERE chat_id = c.id
-              ORDER BY created_at DESC
-              LIMIT 1
-            ) AS last_message
-          FROM chats c
-          JOIN users u
-          ON u.id = CASE
-            WHEN c.user_a = $1 THEN c.user_b
-            ELSE c.user_a
-          END
-          WHERE c.user_a = $1 OR c.user_b = $1
-          `,
-          [currentUser.id]
-        );
-
-        chats = chatResult.rows;
-      }
-    }
-
-    // 3️⃣ Risposta completa
     return res.json({
-      all_contacts: phones.map(p => ({ phone: "+" + p, name: "" })),
+      all_contacts: allContacts,
       ww_contacts: wwContacts,
-      chats,
-      current_user: currentUser
+      chats: chatResult.rows,
+      current_user: { id: userId }
     });
 
   } catch (err) {
     console.error("CONTACTS SYNC ERROR:", err);
     return res.status(500).json({ error: "Server error" });
   }
+});
+
 });
 
 // ------------------------------------------------------------
