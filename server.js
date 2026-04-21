@@ -1,6 +1,7 @@
 // ------------------------------------------------------------
 // DOTENV
 // -----------------------------------------------------------
+// deploy test
 
 
 import dotenv from "dotenv";
@@ -680,55 +681,49 @@ app.delete("/delete-message/:id", async (req, res) => {
   }
 });
 
-// ------------------------------------------------------------
+// // ------------------------------------------------------------
 // CHAT — CREA O RECUPERA CHAT TRA DUE UTENTI
 // ------------------------------------------------------------
-app.get("/chat/list/:user_id", async (req, res) => {
+app.post("/chat/create", async (req, res) => {
   try {
-    const { user_id } = req.params;
+    const { user1, user2 } = req.body;
 
-    const result = await client.query(
+    if (!user1 || !user2) {
+      return res.status(400).json({ error: "Missing user1 or user2" });
+    }
+
+    // 1️⃣ Cerca chat esistente
+    const existing = await client.query(
       `
-      SELECT 
-        c.id AS chat_id,
-        CASE 
-          WHEN c.user1 = $1 THEN c.user2
-          ELSE c.user1
-        END AS other_id,
-        u.name AS other_name,
-        (
-          SELECT content 
-          FROM chat_messages 
-          WHERE chat_id = c.id 
-          ORDER BY created_at DESC 
-          LIMIT 1
-        ) AS last_message,
-        (
-          SELECT created_at 
-          FROM chat_messages 
-          WHERE chat_id = c.id 
-          ORDER BY created_at DESC 
-          LIMIT 1
-        ) AS last_timestamp
-      FROM chats c
-      JOIN users u 
-        ON u.id = CASE 
-                    WHEN c.user1 = $1 THEN c.user2
-                    ELSE c.user1
-                  END
-      WHERE c.user1 = $1 OR c.user2 = $1
-      ORDER BY last_timestamp DESC NULLS LAST
+      SELECT id FROM chats
+      WHERE (user1 = $1 AND user2 = $2)
+         OR (user1 = $2 AND user2 = $1)
       `,
-      [user_id]
+      [user1, user2]
     );
 
-    return res.json({ chats: result.rows });
+    if (existing.rows.length > 0) {
+      return res.json({ chat_id: existing.rows[0].id });
+    }
+
+    // 2️⃣ Crea nuova chat
+    const result = await client.query(
+      `
+      INSERT INTO chats (user1, user2)
+      VALUES ($1, $2)
+      RETURNING id
+      `,
+      [user1, user2]
+    );
+
+    return res.json({ chat_id: result.rows[0].id });
 
   } catch (err) {
-    console.error("ERRORE /chat/list:", err);
-    return res.status(500).json({ error: err.message });
+    console.error("CHAT CREATE ERROR:", err);
+    return res.status(500).json({ error: "Server error" });
   }
 });
+
 
 
 
