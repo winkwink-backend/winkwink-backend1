@@ -1,6 +1,8 @@
 // ------------------------------------------------------------
 // DOTENV
-// ------------------------------------------------------------
+// -----------------------------------------------------------
+
+
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -17,6 +19,11 @@ import bcrypt from "bcrypt";
 import nodemailer from "nodemailer";
 
 const { Client } = pkg;
+
+console.log(">>> SERVER.JS CARICATO <<<");
+console.log(">>> QUESTO È IL FILE CHE RENDER STA ESEGUENDO <<<");
+
+
 
 // ------------------------------------------------------------
 // POSTGRESQL CONNECTION (Render)
@@ -102,32 +109,43 @@ app.post("/register", async (req, res) => {
 // AUTH — LOGIN (ECC / PHONE + PUBLIC KEY)
 // ------------------------------------------------------------
 app.post("/login", async (req, res) => {
+  console.log("LOGIN BODY:", req.body);
+
   try {
-    const { phone, publicKey } = req.body;
+
+    const { phone, publicKey, name, lastName, qrData, userId } = req.body;
 
     if (!phone || !publicKey) {
       return res.status(400).json({ error: "Missing phone or publicKey" });
     }
 
     const result = await client.query(
-      `INSERT INTO users (phone, public_key)
-       VALUES ($1, $2)
-       ON CONFLICT (phone)
-       DO UPDATE SET public_key = EXCLUDED.public_key
-       RETURNING *`,
-      [phone, publicKey]
+      `
+      INSERT INTO users (phone, public_key, name, last_name, qr_data, peer_id)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (phone)
+      DO UPDATE SET 
+        public_key = EXCLUDED.public_key,
+        name = EXCLUDED.name,
+        last_name = EXCLUDED.last_name,
+        qr_data = EXCLUDED.qr_data,
+        peer_id = EXCLUDED.peer_id
+      RETURNING *
+      `,
+      [phone, publicKey, name, lastName, qrData, userId]
     );
 
     return res.status(200).json({
       success: true,
       user: result.rows[0],
     });
-
   } catch (err) {
     console.error("LOGIN ERROR:", err);
     return res.status(500).json({ error: "Server error" });
   }
 });
+
+
 
 // ------------------------------------------------------------
 // PASSWORD RESET — REQUEST OTP
@@ -989,24 +1007,23 @@ app.post("/contacts/sync", async (req, res) => {
 
     // 1️⃣ Trova utenti WinkWink
     const wwResult = await client.query(
-      `
-      SELECT
-        id AS "userId",
-        name,
-        last_name AS "lastName",
-        phone,
-        public_key AS "publicKey",
-        qr_data AS "qrData",
-        peer_id AS "peerId",
-        fingerprint,
-        version
-      FROM users
-      WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
-      `,
-      [phones]
+    `
+    SELECT
+      id AS "userId",
+      name AS "name",
+      last_name AS "lastName",
+      phone,
+      public_key AS "publicKey",
+      qr_data AS "qrData",
+      peer_id AS "peerId",
+      fingerprint,
+      version
+    FROM users
+    WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
+     `,
+    [phones]
     );
-
-    const wwContacts = wwResult.rows;
+    const wwContacts = wwResult.rows; 
 
     // 2️⃣ Chat dell’utente loggato
     const chatResult = await client.query(
