@@ -17,14 +17,31 @@ require('dotenv').config();
 // ------------------------------------------------------------
 // IMPORTS
 // ------------------------------------------------------------
+import pkg from 'pg';
+const { Pool, Client } = pkg;
+
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from "express";
 import multer from "multer";
 import cors from "cors";
 import { exec } from "child_process";
 import fs from "fs";
-import pkg from "pg";
 import bcrypt from "bcrypt";
 import nodemailer from "nodemailer";
+import { createServer } from "http";
+import { Server } from "socket.io";
+
+// ------------------------------------------------------------
+// POSTGRESQL CONNECTION
+// ------------------------------------------------------------
+const pool = new Pool({
+  connectionString: "postgres://winkwink_db_user:OrCTUsRf6pIFyufs4uNx9m15bvgXIXjP@://render.com",
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
 
 const { Client } = pkg;
 
