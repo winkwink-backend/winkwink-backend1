@@ -1163,69 +1163,68 @@ io.on("connection", (socket) => {
     // ENTRA IN UNA CHAT
     // ------------------------------------------------------------
     socket.on("enter_chat", ({ chat_id, user_id }) => {
-    if (!chatRooms.has(chat_id)) {
-        chatRooms.set(chat_id, new Set());
-    }
+        if (!chatRooms.has(chat_id)) {
+            chatRooms.set(chat_id, new Set());
+        }
 
-    chatRooms.get(chat_id).add(socket.id);
-    socket.join(`chat_${chat_id}`);
+        chatRooms.get(chat_id).add(socket.id);
+        socket.join(`chat_${chat_id}`);
 
-    io.to(socket.id).emit("chat_joined", { chat_id });
-    io.emit("user_in_chat", { chat_id, user_id });
+        io.to(socket.id).emit("chat_joined", { chat_id });
+        io.emit("user_in_chat", { chat_id, user_id });
 
-    console.log(`💬 Utente ${user_id} è entrato nella chat ${chat_id}`);
+        console.log(`💬 Utente ${user_id} è entrato nella chat ${chat_id}`);
     });
 
     // ------------------------------------------------------------
     // ESCI DA UNA CHAT
     // ------------------------------------------------------------
     socket.on("leave_chat", ({ chat_id, user_id }) => {
-    if (chatRooms.has(chat_id)) {
-        chatRooms.get(chat_id).delete(socket.id);
+        if (chatRooms.has(chat_id)) {
+            chatRooms.get(chat_id).delete(socket.id);
 
-        if (chatRooms.get(chat_id).size === 0) {
-            chatRooms.delete(chat_id);
+            if (chatRooms.get(chat_id).size === 0) {
+                chatRooms.delete(chat_id);
+            }
         }
-    }
 
-    socket.leave(`chat_${chat_id}`);
+        socket.leave(`chat_${chat_id}`);
 
-    console.log(`↩️ Utente ${user_id} ha lasciato la chat ${chat_id}`);
+        console.log(`↩️ Utente ${user_id} ha lasciato la chat ${chat_id}`);
     });
 
-    
     // ------------------------------------------------------------
     // MESSAGGI REALTIME (CON SALVATAGGIO DB)
     // ------------------------------------------------------------
     socket.on("send_message", async ({ chat_id, message }) => {
-    try {
-        // 1. Salva nel DB
-        const result = await pool.query(
-            "INSERT INTO chat_messages (chat_id, sender_id, content, created_at) VALUES ($1, $2, $3, $4) RETURNING *",
-            [chat_id, message.sender_id, message.content, message.created_at]
-        );
+        try {
+            const result = await pool.query(
+                `INSERT INTO chat_messages (chat_id, sender_id, content, created_at)
+                 VALUES ($1, $2, $3, $4)
+                 RETURNING *`,
+                [chat_id, message.sender_id, message.content, message.created_at]
+            );
 
-        const saved = result.rows[0];
+            const saved = result.rows[0];
 
-        // 2. Invia SOLO agli utenti nella stanza
-        io.to(`chat_${chat_id}`).emit("new_message", {
-            chat_id,
-            sender_id: saved.sender_id,
-            content: saved.content,
-            created_at: saved.created_at
-        });
+            io.to(`chat_${chat_id}`).emit("new_message", {
+                chat_id,
+                sender_id: saved.sender_id,
+                content: saved.content,
+                created_at: saved.created_at
+            });
 
-        console.log(`📩 Messaggio inoltrato nella chat ${chat_id}`);
-    } catch (err) {
-        console.error("❌ Errore salvataggio messaggio:", err);
-    }
-    }); 
+            console.log(`📩 Messaggio inoltrato nella chat ${chat_id}`);
+        } catch (err) {
+            console.error("❌ Errore salvataggio messaggio:", err);
+        }
+    });
 
     // ------------------------------------------------------------
-    // SIGNALING WEBRTC (CORRETTO PER FLUTTER)
+    // SIGNALING WEBRTC
     // ------------------------------------------------------------
     socket.on("offer", ({ toUserId, offer }) => {
-        const target = onlineUsers.get(toUserId); // Usa toUserId come inviato da Flutter
+        const target = onlineUsers.get(toUserId);
         if (target) {
             io.to(target).emit("offer", { from: socket.userId, offer });
             console.log(`📡 Offer da ${socket.userId} a ${toUserId}`);
@@ -1248,9 +1247,8 @@ io.on("connection", (socket) => {
         }
     });
 
-
     // ------------------------------------------------------------
-    // DISCONNESSIONE (PRESENZA)
+    // DISCONNESSIONE
     // ------------------------------------------------------------
     socket.on("disconnect", () => {
         const userId = socket.userId;
@@ -1262,7 +1260,6 @@ io.on("connection", (socket) => {
             console.log(`🔴 Utente ${userId} offline`);
         }
 
-        // Pulizia chatRooms
         for (const [chatId, sockets] of chatRooms.entries()) {
             sockets.delete(socket.id);
             if (sockets.size === 0) {
@@ -1271,6 +1268,7 @@ io.on("connection", (socket) => {
         }
     });
 });
+
 
 
 // ------------------------------------------------------------
