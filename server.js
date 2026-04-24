@@ -1,24 +1,10 @@
 // ------------------------------------------------------------
 // DOTENV
 // -----------------------------------------------------------
-// deploy test
-const { Pool } = require('pg');
-
-const pool = new Pool({
-  connectionString: "postgres://winkwink_db_user:OrCTUsRf6pIFyufs4uNx9m15bvgXIXjP@dpg-d7b979vafjfc73fq7sqg-a.frankfurt-postgres.render.com/winkwink_db",
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
-
-require('dotenv').config();
 
 
-// ------------------------------------------------------------
-// IMPORTS
-// ------------------------------------------------------------
 import pkg from 'pg';
-const { Pool, Client } = pkg;
+const { Pool } = pkg;
 
 import dotenv from 'dotenv';
 dotenv.config();
@@ -34,16 +20,26 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 
 // ------------------------------------------------------------
-// POSTGRESQL CONNECTION
+// POSTGRESQL CONNECTION (Configurazione Unica)
 // ------------------------------------------------------------
 const pool = new Pool({
-  connectionString: "postgres://winkwink_db_user:OrCTUsRf6pIFyufs4uNx9m15bvgXIXjP@://render.com",
+  connectionString: "postgres://winkwink_db_user:OrCTUsRf6pIFyufs4uNx9m15bvgXIXjP@dpg-d7b979vafjfc73fq7sqg-a.frankfurt-postgres.render.com/winkwink_db",
   ssl: {
     rejectUnauthorized: false
   }
 });
 
-const { Client } = pkg;
+// Test connessione immediato
+pool.query('SELECT NOW()', (err, res) => {
+  if (err) {
+    console.error("❌ Errore critico DB:", err);
+  } else {
+    console.log("✅ Database connesso correttamente");
+  }
+});
+
+const app = express();
+
 
 console.log(">>> SERVER.JS CARICATO <<<");
 console.log(">>> QUESTO È IL FILE CHE RENDER STA ESEGUENDO <<<");
