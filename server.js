@@ -1196,11 +1196,14 @@ io.on("connection", (socket) => {
       const saved = result.rows[0];
 
       io.to(`chat_${chat_id}`).emit("new_message", {
-        chat_id,
-        sender_id: saved.sender_id,
-        content: saved.content,
-        created_at: saved.created_at
+      chat_id,
+      sender_id: saved.sender_id,
+      receiver_id: message.receiver_id ?? null,
+      content: saved.content,
+      type: message.type ?? "text",
+      created_at: saved.created_at
       });
+
 
       console.log(`📩 Messaggio inoltrato nella chat ${chat_id}`);
     } catch (err) {
