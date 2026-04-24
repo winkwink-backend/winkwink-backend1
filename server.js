@@ -1186,30 +1186,33 @@ io.on("connection", (socket) => {
   // ------------------------------------------------------------
   socket.on("send_message", async ({ chat_id, message }) => {
     try {
+      // Inseriamo solo le colonne base. created_at lo mette il DB da solo.
       const result = await pool.query(
-        `INSERT INTO chat_messages (chat_id, sender_id, content, created_at)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO chat_messages (chat_id, sender_id, content)
+         VALUES ($1, $2, $3)
          RETURNING *`,
-        [chat_id, message.sender_id, message.content, message.created_at]
+        [chat_id, message.sender_id, message.content]
       );
 
       const saved = result.rows[0];
 
+      // Invio immediato ai dispositivi
       io.to(`chat_${chat_id}`).emit("new_message", {
-      chat_id,
-      sender_id: saved.sender_id,
-      receiver_id: message.receiver_id ?? null,
-      content: saved.content,
-      type: message.type ?? "text",
-      created_at: saved.created_at
+        chat_id: parseInt(chat_id),
+        sender_id: saved.sender_id,
+        receiver_id: message.receiver_id ?? null,
+        content: saved.content,
+        type: message.type ?? "text",
+        created_at: saved.created_at // Usiamo quella restituita dal DB
       });
 
-
-      console.log(`📩 Messaggio inoltrato nella chat ${chat_id}`);
+      console.log(`✅ Messaggio Realtime inviato: Chat ${chat_id}`);
     } catch (err) {
-      console.error("❌ Errore salvataggio messaggio:", err);
+      // Questo print ti dirà esattamente quale colonna manca se l'errore persiste
+      console.error("❌ ERRORE SQL NEL SOCKET:", err.message);
     }
   });
+
 
   // ------------------------------------------------------------
   // SIGNALING WEBRTC
