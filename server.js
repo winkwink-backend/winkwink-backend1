@@ -2,10 +2,17 @@
 // DOTENV
 // -----------------------------------------------------------
 // deploy test
+const { Pool } = require('pg');
 
+const pool = new Pool({
+  connectionString: "postgres://winkwink_db_user:OrCTUsRf6pIFyufs4uNx9m15bvgXIXjP@dpg-d7b979vafjfc73fq7sqg-a.frankfurt-postgres.render.com/winkwink_db",
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
 
-import dotenv from "dotenv";
-dotenv.config();
+require('dotenv').config();
+
 
 // ------------------------------------------------------------
 // IMPORTS
@@ -84,7 +91,7 @@ app.post("/register", async (req, res) => {
     if (!email || !password)
       return res.status(400).json({ error: "Email and password required" });
 
-    const existing = await client.query(
+    const existing = await pool.query(
       "SELECT id FROM users WHERE email = $1",
       [email]
     );
@@ -94,7 +101,7 @@ app.post("/register", async (req, res) => {
 
     const password_hash = await bcrypt.hash(password, 10);
 
-    const result = await client.query(
+    const result = await pool.query(
       "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email, created_at",
       [email, password_hash]
     );
@@ -110,41 +117,37 @@ app.post("/register", async (req, res) => {
 // AUTH — LOGIN (ECC / PHONE + PUBLIC KEY)
 // ------------------------------------------------------------
 app.post("/login", async (req, res) => {
-  console.log("LOGIN BODY:", req.body);
-
   try {
+    const { phone, name, last_name, public_key, qr_data } = req.body;
 
-    const { phone, publicKey, name, lastName, qrData, userId } = req.body;
-
-    if (!phone || !publicKey) {
-      return res.status(400).json({ error: "Missing phone or publicKey" });
-    }
-
-    const result = await client.query(
-      `
-      INSERT INTO users (phone, public_key, name, last_name, qr_data, peer_id)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      ON CONFLICT (phone)
-      DO UPDATE SET 
-        public_key = EXCLUDED.public_key,
-        name = EXCLUDED.name,
-        last_name = EXCLUDED.last_name,
-        qr_data = EXCLUDED.qr_data,
-        peer_id = EXCLUDED.peer_id
-      RETURNING *
-      `,
-      [phone, publicKey, name, lastName, qrData, userId]
+    // Usiamo una query che inserisce tutto e restituisce l'ID
+    const result = await pool.query(
+      `INSERT INTO users (phone, name, last_name, public_key, qr_data, peer_id)
+       VALUES ($1, $2, $3, $4, $5, '0') 
+       ON CONFLICT (phone) 
+       DO UPDATE SET 
+          name = EXCLUDED.name,
+          last_name = EXCLUDED.last_name,
+          public_key = EXCLUDED.public_key,
+          qr_data = EXCLUDED.qr_data
+       RETURNING *;`,
+      [phone, name, last_name, public_key, qr_data]
     );
 
-    return res.status(200).json({
-      success: true,
-      user: result.rows[0],
-    });
+    const user = result.rows[0];
+
+    // ⭐ TRUCCO: Se peer_id è '0' o NULL, lo aggiorniamo subito con l'ID reale
+    if (user.peer_id === '0' || !user.peer_id) {
+      await pool.query("UPDATE users SET peer_id = $1 WHERE id = $1", [user.id]);
+      user.peer_id = user.id.toString();
+    }
+
+    res.json({ success: true, user: user });
   } catch (err) {
-    console.error("LOGIN ERROR:", err);
-    return res.status(500).json({ error: "Server error" });
+    res.status(500).json({ error: err.message });
   }
 });
+
 
 
 
@@ -158,7 +161,7 @@ app.post("/password-reset/request", async (req, res) => {
     if (!email)
       return res.status(400).json({ error: "Email mancante" });
 
-    const result = await client.query(
+    const result = await pool.query(
       "SELECT id FROM users WHERE email = $1",
       [email]
     );
@@ -234,7 +237,7 @@ app.post("/password-reset/new", async (req, res) => {
 
     const hash = await bcrypt.hash(password, 10);
 
-    await client.query(
+    await pool.query(
       "UPDATE users SET password_hash = $1 WHERE email = $2",
       [hash, email]
     );
@@ -258,7 +261,7 @@ app.post("/auth/check-email", async (req, res) => {
     if (!email)
       return res.status(400).json({ error: "Email required" });
 
-    const result = await client.query(
+    const result = await pool.query(
       "SELECT id FROM users WHERE email = $1",
       [email]
     );
@@ -280,7 +283,7 @@ app.post("/keys/register", async (req, res) => {
     if (!user_id || !public_key)
       return res.status(400).json({ error: "Missing fields" });
 
-    await client.query(
+    await pool.query(
       "UPDATE users SET public_key = $1 WHERE id = $2",
       [public_key, user_id]
     );
@@ -294,7 +297,7 @@ app.post("/keys/register", async (req, res) => {
 
 app.get("/keys/:user_id", async (req, res) => {
   try {
-    const result = await client.query(
+    const result = await pool.query(
       "SELECT public_key FROM users WHERE id = $1",
       [req.params.user_id]
     );
@@ -314,7 +317,7 @@ app.get("/keys/:user_id", async (req, res) => {
 // ------------------------------------------------------------
 app.get("/inbox/:user_id", async (req, res) => {
   try {
-    const result = await client.query(
+    const result = await pool.query(
       "SELECT * FROM inbox WHERE to_user_id = $1 ORDER BY created_at DESC",
       [req.params.user_id]
     );
@@ -330,7 +333,7 @@ app.post("/inbox/create", async (req, res) => {
   try {
     const { to_user_id, from_user_id, type, payload } = req.body;
 
-    const result = await client.query(
+    const result = await pool.query(
       "INSERT INTO inbox (to_user_id, from_user_id, type, payload) VALUES ($1, $2, $3, $4) RETURNING *",
       [to_user_id, from_user_id, type, payload]
     );
@@ -360,7 +363,7 @@ app.post("/chat/invite", async (req, res) => {
       message: "Ti hanno invitato in una chat"
     };
 
-    const result = await client.query(
+    const result = await pool.query(
       `INSERT INTO inbox (to_user_id, from_user_id, type, payload)
        VALUES ($1, $2, 'chat_invite', $3)
        RETURNING *`,
@@ -384,13 +387,13 @@ app.post("/p2p/session/create", async (req, res) => {
 
     const sessionId = "sess_" + Date.now();
 
-    const result = await client.query(
+    const result = await pool.query(
       `INSERT INTO p2p_sessions (session_id, from_user_id, to_user_id)
        VALUES ($1, $2, $3) RETURNING *`,
       [sessionId, from_user_id, to_user_id]
     );
 
-    await client.query(
+    await pool.query(
       `INSERT INTO inbox (to_user_id, from_user_id, type, payload)
        VALUES ($1, $2, 'file_transfer_request', $3)`,
       [to_user_id, from_user_id, { sessionId, fileSize, fileType }]
@@ -407,7 +410,7 @@ app.post("/p2p/session/offer", async (req, res) => {
   try {
     const { session_id, offer } = req.body;
 
-    await client.query(
+    await pool.query(
       "UPDATE p2p_sessions SET offer = $1 WHERE session_id = $2",
       [offer, session_id]
     );
@@ -423,7 +426,7 @@ app.post("/p2p/session/answer", async (req, res) => {
   try {
     const { session_id, answer } = req.body;
 
-    await client.query(
+    await pool.query(
       "UPDATE p2p_sessions SET answer = $1 WHERE session_id = $2",
       [answer, session_id]
     );
@@ -439,7 +442,7 @@ app.post("/p2p/session/candidate", async (req, res) => {
   try {
     const { session_id, candidate } = req.body;
 
-    await client.query(
+    await pool.query(
       "UPDATE p2p_sessions SET candidates = candidates || $1::jsonb WHERE session_id = $2",
       [JSON.stringify([candidate]), session_id]
     );
@@ -460,106 +463,111 @@ app.post("/p2p/chat/offer", async (req, res) => {
   try {
     const { from_user_id, to_user_id, offer } = req.body;
 
-    await client.query(
+    await pool.query(
       `
-      INSERT INTO p2p_chat (user1, user2, offer)
+      INSERT INTO p2p_chat (user_a, user_b, offer)
       VALUES ($1, $2, $3)
-      ON CONFLICT (user1, user2)
+      ON CONFLICT (user_a, user_b)
       DO UPDATE SET offer = EXCLUDED.offer, answer = NULL, candidates = '[]'::jsonb, updated_at = NOW()
       `,
       [from_user_id, to_user_id, offer]
     );
 
     return res.json({ status: "ok" });
-
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 });
 
+
 // RECUPERA OFFER
 app.get("/p2p/chat/offer", async (req, res) => {
+  console.log(">>> VERSIONE CORRETTA ATTIVA");
   try {
     const { my_user_id, other_user_id } = req.query;
 
-    const result = await client.query(
+    const result = await pool.query(
       `
       SELECT offer FROM p2p_chat
-      WHERE user1 = $1 AND user2 = $2
+      WHERE (user_a = $1 AND user_b = $2)
+         OR (user_a = $2 AND user_b = $1)
       `,
-      [other_user_id, my_user_id]
+      [my_user_id, other_user_id]
     );
 
     if (result.rows.length === 0)
       return res.json({ offer: null });
 
     return res.json({ offer: result.rows[0].offer });
-
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
+  
 });
+
 
 // INVIA ANSWER
 app.post("/p2p/chat/answer", async (req, res) => {
   try {
     const { from_user_id, to_user_id, answer } = req.body;
 
-    await client.query(
+    await pool.query(
       `
       UPDATE p2p_chat
       SET answer = $1, updated_at = NOW()
-      WHERE user1 = $2 AND user2 = $3
+      WHERE (user_a = $2 AND user_b = $3)
+         OR (user_a = $3 AND user_b = $2)
       `,
-      [answer, to_user_id, from_user_id]
+      [answer, from_user_id, to_user_id]
     );
 
     return res.json({ status: "ok" });
-
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 });
+
 
 // INVIA ICE CANDIDATE
 app.post("/p2p/chat/candidate", async (req, res) => {
   try {
     const { from_user_id, to_user_id, candidate } = req.body;
 
-    await client.query(
+    await pool.query(
       `
       UPDATE p2p_chat
       SET candidates = candidates || $1::jsonb, updated_at = NOW()
-      WHERE user1 = $2 AND user2 = $3
+      WHERE (user_a = $2 AND user_b = $3)
+         OR (user_a = $3 AND user_b = $2)
       `,
       [JSON.stringify([candidate]), from_user_id, to_user_id]
     );
 
     return res.json({ status: "ok" });
-
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 });
-
+// ------------------------------------------------------------
 // RECUPERA ICE CANDIDATES
+// ------------------------------------------------------------
 app.get("/p2p/chat/candidates", async (req, res) => {
   try {
     const { my_user_id, other_user_id } = req.query;
 
-    const result = await client.query(
+    const result = await pool.query(
       `
       SELECT candidates FROM p2p_chat
-      WHERE user1 = $1 AND user2 = $2
+      WHERE (user_a = $1 AND user_b = $2)
+         OR (user_a = $2 AND user_b = $1)
       `,
-      [other_user_id, my_user_id]
+      [my_user_id, other_user_id]
     );
 
     if (result.rows.length === 0)
       return res.json({ candidates: [] });
 
     return res.json({ candidates: result.rows[0].candidates });
-
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -572,7 +580,7 @@ app.post("/files/upload", upload.single("file"), async (req, res) => {
   try {
     const { user_id } = req.body;
 
-    const result = await client.query(
+    const result = await pool.query(
       `INSERT INTO fallback_files (owner_user_id, file_path, size, expires_at)
        VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour')
        RETURNING id`,
@@ -588,7 +596,7 @@ app.post("/files/upload", upload.single("file"), async (req, res) => {
 
 app.get("/files/download/:id", async (req, res) => {
   try {
-    const result = await client.query(
+    const result = await pool.query(
       "SELECT file_path FROM fallback_files WHERE id = $1",
       [req.params.id]
     );
@@ -600,7 +608,7 @@ app.get("/files/download/:id", async (req, res) => {
 
     res.download(filePath, () => {
       fs.unlinkSync(filePath);
-      client.query("DELETE FROM fallback_files WHERE id = $1", [req.params.id]);
+      pool.query("DELETE FROM fallback_files WHERE id = $1", [req.params.id]);
     });
 
   } catch (err) {
@@ -618,7 +626,7 @@ app.post("/send-message", async (req, res) => {
     if (!sender_id || !receiver_id || !content)
       return res.status(400).json({ error: "Missing fields" });
 
-    const result = await client.query(
+    const result = await pool.query(
       "INSERT INTO messages (sender_id, receiver_id, content) VALUES ($1, $2, $3) RETURNING *",
       [sender_id, receiver_id, content]
     );
@@ -634,7 +642,7 @@ app.get("/messages/:user1/:user2", async (req, res) => {
   try {
     const { user1, user2 } = req.params;
 
-    const result = await client.query(
+    const result = await pool.query(
       `SELECT * FROM messages
        WHERE (sender_id = $1 AND receiver_id = $2)
        OR (sender_id = $2 AND receiver_id = $1)
@@ -653,7 +661,7 @@ app.get("/conversations/:user_id", async (req, res) => {
   try {
     const { user_id } = req.params;
 
-    const result = await client.query(
+    const result = await pool.query(
       `SELECT DISTINCT
          CASE
            WHEN sender_id = $1 THEN receiver_id
@@ -673,7 +681,7 @@ app.get("/conversations/:user_id", async (req, res) => {
 
 app.delete("/delete-message/:id", async (req, res) => {
   try {
-    await client.query("DELETE FROM messages WHERE id = $1", [req.params.id]);
+    await pool.query("DELETE FROM messages WHERE id = $1", [req.params.id]);
     res.json({ status: "ok" });
 
   } catch (err) {
@@ -693,7 +701,7 @@ app.post("/chat/create", async (req, res) => {
     }
 
     // 1️⃣ Cerca chat esistente
-    const existing = await client.query(
+    const existing = await pool.query(
       `
       SELECT id FROM chats
       WHERE (user1 = $1 AND user2 = $2)
@@ -707,7 +715,7 @@ app.post("/chat/create", async (req, res) => {
     }
 
     // 2️⃣ Crea nuova chat
-    const result = await client.query(
+    const result = await pool.query(
       `
       INSERT INTO chats (user1, user2)
       VALUES ($1, $2)
@@ -734,7 +742,7 @@ app.get("/chat/list/:user_id", async (req, res) => {
   try {
     const { user_id } = req.params;
 
-    const result = await client.query(
+    const result = await pool.query(
       `
       SELECT 
         c.id AS chat_id,
@@ -787,7 +795,7 @@ app.post("/chat/send", async (req, res) => {
     if (!chat_id || !sender_id || !content)
       return res.status(400).json({ error: "Missing fields" });
 
-    const result = await client.query(
+    const result = await pool.query(
       `INSERT INTO chat_messages (chat_id, sender_id, content)
        VALUES ($1, $2, $3)
        RETURNING *`,
@@ -808,7 +816,7 @@ app.get("/chat/messages/:chat_id", async (req, res) => {
   try {
     const { chat_id } = req.params;
 
-    const result = await client.query(
+    const result = await pool.query(
       `SELECT * FROM chat_messages
        WHERE chat_id = $1
        ORDER BY created_at ASC`,
@@ -823,6 +831,58 @@ app.get("/chat/messages/:chat_id", async (req, res) => {
 });
 
 // ------------------------------------------------------------
+// CHAT — PING UTENTE ATTIVO NELLA CHAT
+// ------------------------------------------------------------
+app.post("/chat/ping", async (req, res) => {
+  try {
+    const { chat_id, user_id } = req.body;
+
+    if (!chat_id || !user_id)
+      return res.status(400).json({ error: "Missing fields" });
+
+    await pool.query(
+      `
+      INSERT INTO chat_active (chat_id, user_id, last_seen)
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (chat_id, user_id)
+      DO UPDATE SET last_seen = NOW()
+      `,
+      [chat_id, user_id]
+    );
+
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+// ------------------------------------------------------------
+// CHAT — UTENTI ATTIVI NELLA CHAT
+// ------------------------------------------------------------
+app.get("/chat/active/:chat_id", async (req, res) => {
+  try {
+    const { chat_id } = req.params;
+
+    const result = await pool.query(
+      `
+      SELECT user_id
+      FROM chat_active
+      WHERE chat_id = $1
+        AND last_seen > NOW() - INTERVAL '60 seconds'
+      `,
+      [chat_id]
+    );
+
+    return res.json({
+      active: result.rows.map(r => r.user_id)
+    });
+
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ------------------------------------------------------------
 // VIDEOS
 // ------------------------------------------------------------
 app.post("/save-video", async (req, res) => {
@@ -832,7 +892,7 @@ app.post("/save-video", async (req, res) => {
     if (!user_id || !filename)
       return res.status(400).json({ error: "user_id and filename required" });
 
-    const result = await client.query(
+    const result = await pool.query(
       "INSERT INTO videos (user_id, filename) VALUES ($1, $2) RETURNING id, user_id, filename, created_at",
       [user_id, filename]
     );
@@ -848,7 +908,7 @@ app.get("/videos/:user_id", async (req, res) => {
   try {
     const { user_id } = req.params;
 
-    const result = await client.query(
+    const result = await pool.query(
       "SELECT id, filename, created_at FROM videos WHERE user_id = $1 ORDER BY created_at DESC",
       [user_id]
     );
@@ -930,7 +990,7 @@ app.get("/users/check", async (req, res) => {
 
     console.log("PHONE NORMALIZZATO:", phone);
 
-    const result = await client.query(
+    const result = await pool.query(
       "SELECT id, public_key FROM users WHERE phone = $1",
       [phone]
     );
@@ -966,7 +1026,7 @@ app.post("/contacts/check", async (req, res) => {
       p.replace(/\s+/g, "").replace(/^\+/, "")
     );
 
-    const result = await client.query(
+    const result = await pool.query(
       `
       SELECT id, phone, public_key
       FROM users
@@ -1001,7 +1061,7 @@ app.post("/contacts/sync", async (req, res) => {
     );
 
     // 1️⃣ Trova utenti WinkWink
-    const wwResult = await client.query(
+    const wwResult = await pool.query(
     `
     SELECT
       id AS "userId",
@@ -1021,7 +1081,7 @@ app.post("/contacts/sync", async (req, res) => {
     const wwContacts = wwResult.rows; 
 
     // 2️⃣ Chat dell’utente loggato
-    const chatResult = await client.query(
+    const chatResult = await pool.query(
       `
       SELECT
         c.id AS chat_id,
@@ -1076,6 +1136,161 @@ app.get("/", (req, res) => {
     res.send("Backend WinkWink attivo");
 });
 
-app.listen(PORT, () => {
-    console.log(`Server attivo su porta ${PORT}`);
+// ------------------------------------------------------------
+// ⭐ WEBSOCKET SERVER (Presence + Messaging + Signaling)
+// ------------------------------------------------------------
+import { createServer } from "http";
+import { Server } from "socket.io";
+
+// Creiamo un server HTTP che ingloba Express
+const httpServer = createServer(app);
+
+// Inizializziamo Socket.IO
+const io = new Server(httpServer, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
 });
+
+// Mappa presenza: userId → socketId
+const onlineUsers = new Map();
+
+// Mappa chat: chatId → Set(socketId)
+const chatRooms = new Map();
+
+io.on("connection", (socket) => {
+    console.log("🔌 Nuova connessione WebSocket:", socket.id);
+
+    // ------------------------------------------------------------
+    // REGISTRAZIONE UTENTE (PRESENZA)
+    // ------------------------------------------------------------
+    socket.on("register", (userId) => {
+        socket.userId = userId;
+        onlineUsers.set(userId, socket.id);
+
+        console.log(`🟢 Utente ${userId} online`);
+
+        io.emit("user_online", { userId });
+    });
+
+    // ------------------------------------------------------------
+    // ENTRA IN UNA CHAT
+    // ------------------------------------------------------------
+    socket.on("enter_chat", ({ chatId, userId }) => {
+        if (!chatRooms.has(chatId)) {
+            chatRooms.set(chatId, new Set());
+        }
+
+        chatRooms.get(chatId).add(socket.id);
+
+        socket.join(`chat_${chatId}`);
+
+        io.to(socket.id).emit("chat_joined", { chatId });
+        io.emit("user_in_chat", { chatId, userId });
+
+        console.log(`💬 Utente ${userId} è entrato nella chat ${chatId}`);
+    });
+
+    // ------------------------------------------------------------
+    // ESCI DA UNA CHAT
+    // ------------------------------------------------------------
+    socket.on("leave_chat", ({ chatId, userId }) => {
+        if (chatRooms.has(chatId)) {
+            chatRooms.get(chatId).delete(socket.id);
+
+            if (chatRooms.get(chatId).size === 0) {
+                chatRooms.delete(chatId);
+            }
+        }
+
+        socket.leave(`chat_${chatId}`);
+
+        console.log(`↩️ Utente ${userId} ha lasciato la chat ${chatId}`);
+    });
+
+    // ------------------------------------------------------------
+    // MESSAGGI REALTIME
+    // ------------------------------------------------------------
+        // ------------------------------------------------------------
+    // MESSAGGI REALTIME (CON SALVATAGGIO DB)
+    // ------------------------------------------------------------
+    socket.on("send_message", async ({ chatId, message }) => {
+        try {
+            // 1. Salva nel database (fondamentale per la cronologia)
+            await pool.query(
+                "INSERT INTO chat_messages (chat_id, sender_id, content) VALUES ($1, $2, $3)",
+                [chatId, message.sender_id, message.content]
+            );
+
+            // 2. Invia a chi è nella stanza della chat
+            io.to(`chat_${chatId}`).emit("new_message", message);
+
+            // 3. Invia a tutti gli altri per aggiornare la preview nella ChatListPage
+            socket.broadcast.emit("new_message", message);
+            
+            console.log(`📩 Messaggio in chat ${chatId} da ${message.sender_id} salvato e inviato.`);
+        } catch (err) {
+            console.error("❌ Errore salvataggio messaggio:", err);
+        }
+    });
+
+    // ------------------------------------------------------------
+    // SIGNALING WEBRTC (CORRETTO PER FLUTTER)
+    // ------------------------------------------------------------
+    socket.on("offer", ({ toUserId, offer }) => {
+        const target = onlineUsers.get(toUserId); // Usa toUserId come inviato da Flutter
+        if (target) {
+            io.to(target).emit("offer", { from: socket.userId, offer });
+            console.log(`📡 Offer da ${socket.userId} a ${toUserId}`);
+        }
+    });
+
+    socket.on("answer", ({ toUserId, answer }) => {
+        const target = onlineUsers.get(toUserId);
+        if (target) {
+            io.to(target).emit("answer", { from: socket.userId, answer });
+            console.log(`📡 Answer da ${socket.userId} a ${toUserId}`);
+        }
+    });
+
+    socket.on("ice_candidate", ({ toUserId, candidate }) => {
+        const target = onlineUsers.get(toUserId);
+        if (target) {
+            io.to(target).emit("ice_candidate", { from: socket.userId, candidate });
+            console.log(`❄️ ICE Candidate da ${socket.userId} a ${toUserId}`);
+        }
+    });
+
+
+    // ------------------------------------------------------------
+    // DISCONNESSIONE (PRESENZA)
+    // ------------------------------------------------------------
+    socket.on("disconnect", () => {
+        const userId = socket.userId;
+
+        if (userId) {
+            onlineUsers.delete(userId);
+            io.emit("user_offline", { userId });
+
+            console.log(`🔴 Utente ${userId} offline`);
+        }
+
+        // Pulizia chatRooms
+        for (const [chatId, sockets] of chatRooms.entries()) {
+            sockets.delete(socket.id);
+            if (sockets.size === 0) {
+                chatRooms.delete(chatId);
+            }
+        }
+    });
+});
+
+
+// ------------------------------------------------------------
+// AVVIO SERVER HTTP + WEBSOCKET
+// ------------------------------------------------------------
+httpServer.listen(PORT, () => {
+  console.log(`🚀 Server + WebSocket attivi su porta ${PORT}`);
+});
+
