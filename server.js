@@ -1162,63 +1162,64 @@ io.on("connection", (socket) => {
     // ------------------------------------------------------------
     // ENTRA IN UNA CHAT
     // ------------------------------------------------------------
-    socket.on("enter_chat", ({ chatId, userId }) => {
-        if (!chatRooms.has(chatId)) {
-            chatRooms.set(chatId, new Set());
-        }
+    socket.on("enter_chat", ({ chat_id, user_id }) => {
+    if (!chatRooms.has(chat_id)) {
+        chatRooms.set(chat_id, new Set());
+    }
 
-        chatRooms.get(chatId).add(socket.id);
+    chatRooms.get(chat_id).add(socket.id);
+    socket.join(`chat_${chat_id}`);
 
-        socket.join(`chat_${chatId}`);
+    io.to(socket.id).emit("chat_joined", { chat_id });
+    io.emit("user_in_chat", { chat_id, user_id });
 
-        io.to(socket.id).emit("chat_joined", { chatId });
-        io.emit("user_in_chat", { chatId, userId });
-
-        console.log(`💬 Utente ${userId} è entrato nella chat ${chatId}`);
+    console.log(`💬 Utente ${user_id} è entrato nella chat ${chat_id}`);
     });
 
     // ------------------------------------------------------------
     // ESCI DA UNA CHAT
     // ------------------------------------------------------------
-    socket.on("leave_chat", ({ chatId, userId }) => {
-        if (chatRooms.has(chatId)) {
-            chatRooms.get(chatId).delete(socket.id);
+    socket.on("leave_chat", ({ chat_id, user_id }) => {
+    if (chatRooms.has(chat_id)) {
+        chatRooms.get(chat_id).delete(socket.id);
 
-            if (chatRooms.get(chatId).size === 0) {
-                chatRooms.delete(chatId);
-            }
+        if (chatRooms.get(chat_id).size === 0) {
+            chatRooms.delete(chat_id);
         }
+    }
 
-        socket.leave(`chat_${chatId}`);
+    socket.leave(`chat_${chat_id}`);
 
-        console.log(`↩️ Utente ${userId} ha lasciato la chat ${chatId}`);
+    console.log(`↩️ Utente ${user_id} ha lasciato la chat ${chat_id}`);
     });
 
+    
     // ------------------------------------------------------------
-    // MESSAGGI REALTIME
-    // ------------------------------------------------------------
-        // ------------------------------------------------------------
     // MESSAGGI REALTIME (CON SALVATAGGIO DB)
     // ------------------------------------------------------------
-    socket.on("send_message", async ({ chatId, message }) => {
-        try {
-            // 1. Salva nel database (fondamentale per la cronologia)
-            await pool.query(
-                "INSERT INTO chat_messages (chat_id, sender_id, content) VALUES ($1, $2, $3)",
-                [chatId, message.sender_id, message.content]
-            );
+    socket.on("send_message", async ({ chat_id, message }) => {
+    try {
+        // 1. Salva nel DB
+        const result = await pool.query(
+            "INSERT INTO chat_messages (chat_id, sender_id, content, created_at) VALUES ($1, $2, $3, $4) RETURNING *",
+            [chat_id, message.sender_id, message.content, message.created_at]
+        );
 
-            // 2. Invia a chi è nella stanza della chat
-            io.to(`chat_${chatId}`).emit("new_message", message);
+        const saved = result.rows[0];
 
-            // 3. Invia a tutti gli altri per aggiornare la preview nella ChatListPage
-            socket.broadcast.emit("new_message", message);
-            
-            console.log(`📩 Messaggio in chat ${chatId} da ${message.sender_id} salvato e inviato.`);
-        } catch (err) {
-            console.error("❌ Errore salvataggio messaggio:", err);
-        }
-    });
+        // 2. Invia SOLO agli utenti nella stanza
+        io.to(`chat_${chat_id}`).emit("new_message", {
+            chat_id,
+            sender_id: saved.sender_id,
+            content: saved.content,
+            created_at: saved.created_at
+        });
+
+        console.log(`📩 Messaggio inoltrato nella chat ${chat_id}`);
+    } catch (err) {
+        console.error("❌ Errore salvataggio messaggio:", err);
+    }
+    }); 
 
     // ------------------------------------------------------------
     // SIGNALING WEBRTC (CORRETTO PER FLUTTER)
