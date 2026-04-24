@@ -20,9 +20,10 @@ import { Server } from "socket.io";
 
 // 1. CONFIGURAZIONE DB 
 const pool = new Pool({
-  connectionString: "postgres://winkwink_db_user:OrCTUsRf6pIFyufs4uNx9m15bvgXIXjP@://render.com",
+  connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
+
 
 pool.query('SELECT NOW()', (err) => {
   if (err) console.error("❌ Errore critico DB:", err);
