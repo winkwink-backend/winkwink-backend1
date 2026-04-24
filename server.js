@@ -19,57 +19,29 @@ import nodemailer from "nodemailer";
 import { createServer } from "http";
 import { Server } from "socket.io";
 
-// ------------------------------------------------------------
-// POSTGRESQL CONNECTION (Configurazione Unica)
-// ------------------------------------------------------------
+// 1. CONFIGURAZIONE DB 
 const pool = new Pool({
-  connectionString: "postgres://winkwink_db_user:OrCTUsRf6pIFyufs4uNx9m15bvgXIXjP@dpg-d7b979vafjfc73fq7sqg-a.frankfurt-postgres.render.com/winkwink_db",
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
-
-// Test connessione immediato
-pool.query('SELECT NOW()', (err, res) => {
-  if (err) {
-    console.error("❌ Errore critico DB:", err);
-  } else {
-    console.log("✅ Database connesso correttamente");
-  }
-});
-
-const app = express();
-
-
-console.log(">>> SERVER.JS CARICATO <<<");
-console.log(">>> QUESTO È IL FILE CHE RENDER STA ESEGUENDO <<<");
-
-
-
-// ------------------------------------------------------------
-// POSTGRESQL CONNECTION (Render)
-// ------------------------------------------------------------
-const client = new Client({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: "postgres://winkwink_db_user:OrCTUsRf6pIFyufs4uNx9m15bvgXIXjP@://render.com",
   ssl: { rejectUnauthorized: false }
 });
 
-client.connect()
-  .then(() => console.log("Connected to PostgreSQL"))
-  .catch(err => console.error("PostgreSQL connection error:", err));
+pool.query('SELECT NOW()', (err) => {
+  if (err) console.error("❌ Errore critico DB:", err);
+  else console.log("✅ Database connesso correttamente");
+});
 
-// ------------------------------------------------------------
-// EXPRESS SETUP
-// ------------------------------------------------------------
+// 2. SETUP EXPRESS (Una volta sola!)
 const app = express();
 app.use(cors());
 app.use(express.json());
 const upload = multer({ dest: "uploads/" });
 
+console.log(">>> SERVER.JS CARICATO <<<");
+
 app.get("/debug", (req, res) => {
   res.json({
     status: "online",
-    message: "Il server Node sta leggendo QUESTO file server.js!"
+    message: "Il server Node è finalmente online!"
   });
 });
 
