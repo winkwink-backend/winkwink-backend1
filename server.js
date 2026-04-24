@@ -1,7 +1,6 @@
 // ------------------------------------------------------------
 // DOTENV
-// -----------------------------------------------------------
-
+// ------------------------------------------------------------
 
 import pkg from 'pg';
 const { Pool } = pkg;
@@ -132,9 +131,6 @@ app.post("/login", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-
-
 
 // ------------------------------------------------------------
 // PASSWORD RESET — REQUEST OTP
@@ -438,7 +434,6 @@ app.post("/p2p/session/candidate", async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
-
 // ------------------------------------------------------------
 // ⭐⭐ P2P CHAT WEBRTC — NUOVA SEZIONE COMPLETA ⭐⭐
 // ------------------------------------------------------------
@@ -464,7 +459,6 @@ app.post("/p2p/chat/offer", async (req, res) => {
   }
 });
 
-
 // RECUPERA OFFER
 app.get("/p2p/chat/offer", async (req, res) => {
   console.log(">>> VERSIONE CORRETTA ATTIVA");
@@ -487,9 +481,7 @@ app.get("/p2p/chat/offer", async (req, res) => {
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
-  
 });
-
 
 // INVIA ANSWER
 app.post("/p2p/chat/answer", async (req, res) => {
@@ -512,7 +504,6 @@ app.post("/p2p/chat/answer", async (req, res) => {
   }
 });
 
-
 // INVIA ICE CANDIDATE
 app.post("/p2p/chat/candidate", async (req, res) => {
   try {
@@ -533,6 +524,7 @@ app.post("/p2p/chat/candidate", async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
 // ------------------------------------------------------------
 // RECUPERA ICE CANDIDATES
 // ------------------------------------------------------------
@@ -674,7 +666,7 @@ app.delete("/delete-message/:id", async (req, res) => {
   }
 });
 
-// // ------------------------------------------------------------
+// ------------------------------------------------------------
 // CHAT — CREA O RECUPERA CHAT TRA DUE UTENTI
 // ------------------------------------------------------------
 app.post("/chat/create", async (req, res) => {
@@ -716,9 +708,6 @@ app.post("/chat/create", async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
-
-
-
 
 // ------------------------------------------------------------
 // ⭐ CHAT — LISTA CHAT PER UN UTENTE (PATCH AGGIUNTA)
@@ -840,6 +829,7 @@ app.post("/chat/ping", async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
 // ------------------------------------------------------------
 // CHAT — UTENTI ATTIVI NELLA CHAT
 // ------------------------------------------------------------
@@ -865,7 +855,6 @@ app.get("/chat/active/:chat_id", async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
-
 
 // ------------------------------------------------------------
 // VIDEOS
@@ -1027,6 +1016,7 @@ app.post("/contacts/check", async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+
 // ------------------------------------------------------------
 // CONTACTS — SYNC COMPLETO (per WinkWink)
 // ------------------------------------------------------------
@@ -1047,21 +1037,21 @@ app.post("/contacts/sync", async (req, res) => {
 
     // 1️⃣ Trova utenti WinkWink
     const wwResult = await pool.query(
-    `
-    SELECT
-      id AS "userId",
-      name AS "name",
-      last_name AS "lastName",
-      phone,
-      public_key AS "publicKey",
-      qr_data AS "qrData",
-      peer_id AS "peerId",
-      fingerprint,
-      version
-    FROM users
-    WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
-     `,
-    [phones]
+      `
+      SELECT
+        id AS "userId",
+        name AS "name",
+        last_name AS "lastName",
+        phone,
+        public_key AS "publicKey",
+        qr_data AS "qrData",
+        peer_id AS "peerId",
+        fingerprint,
+        version
+      FROM users
+      WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
+      `,
+      [phones]
     );
     const wwContacts = wwResult.rows; 
 
@@ -1107,25 +1097,22 @@ app.post("/contacts/sync", async (req, res) => {
     });
 
   } catch (err) {
-        console.error("CONTACTS SYNC ERROR:", err);
-        return res.status(500).json({ error: "Server error" });
-    }
+    console.error("CONTACTS SYNC ERROR:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
 }); // Questa chiude app.post("/contacts/sync")
-
 // ------------------------------------------------------------
 // ROOT + SERVER START
 // ------------------------------------------------------------
 const PORT = process.env.PORT || 10000;
 
 app.get("/", (req, res) => {
-    res.send("Backend WinkWink attivo");
+  res.send("Backend WinkWink attivo");
 });
 
 // ------------------------------------------------------------
 // ⭐ WEBSOCKET SERVER (Presence + Messaging + Signaling)
 // ------------------------------------------------------------
-import { createServer } from "http";
-import { Server } from "socket.io";
 
 // Creiamo un server HTTP che ingloba Express
 const httpServer = createServer(app);
@@ -1145,131 +1132,129 @@ const onlineUsers = new Map();
 const chatRooms = new Map();
 
 io.on("connection", (socket) => {
-    console.log("🔌 Nuova connessione WebSocket:", socket.id);
+  console.log("🔌 Nuova connessione WebSocket:", socket.id);
 
-    // ------------------------------------------------------------
-    // REGISTRAZIONE UTENTE (PRESENZA)
-    // ------------------------------------------------------------
-    socket.on("register", (userId) => {
-        socket.userId = userId;
-        onlineUsers.set(userId, socket.id);
+  // ------------------------------------------------------------
+  // REGISTRAZIONE UTENTE (PRESENZA)
+  // ------------------------------------------------------------
+  socket.on("register", (userId) => {
+    socket.userId = userId;
+    onlineUsers.set(userId, socket.id);
 
-        console.log(`🟢 Utente ${userId} online`);
+    console.log(`🟢 Utente ${userId} online`);
 
-        io.emit("user_online", { userId });
-    });
+    io.emit("user_online", { userId });
+  });
 
-    // ------------------------------------------------------------
-    // ENTRA IN UNA CHAT
-    // ------------------------------------------------------------
-    socket.on("enter_chat", ({ chat_id, user_id }) => {
-        if (!chatRooms.has(chat_id)) {
-            chatRooms.set(chat_id, new Set());
-        }
+  // ------------------------------------------------------------
+  // ENTRA IN UNA CHAT
+  // ------------------------------------------------------------
+  socket.on("enter_chat", ({ chat_id, user_id }) => {
+    if (!chatRooms.has(chat_id)) {
+      chatRooms.set(chat_id, new Set());
+    }
 
-        chatRooms.get(chat_id).add(socket.id);
-        socket.join(`chat_${chat_id}`);
+    chatRooms.get(chat_id).add(socket.id);
+    socket.join(`chat_${chat_id}`);
 
-        io.to(socket.id).emit("chat_joined", { chat_id });
-        io.emit("user_in_chat", { chat_id, user_id });
+    io.to(socket.id).emit("chat_joined", { chat_id });
+    io.emit("user_in_chat", { chat_id, user_id });
 
-        console.log(`💬 Utente ${user_id} è entrato nella chat ${chat_id}`);
-    });
+    console.log(`💬 Utente ${user_id} è entrato nella chat ${chat_id}`);
+  });
 
-    // ------------------------------------------------------------
-    // ESCI DA UNA CHAT
-    // ------------------------------------------------------------
-    socket.on("leave_chat", ({ chat_id, user_id }) => {
-        if (chatRooms.has(chat_id)) {
-            chatRooms.get(chat_id).delete(socket.id);
+  // ------------------------------------------------------------
+  // ESCI DA UNA CHAT
+  // ------------------------------------------------------------
+  socket.on("leave_chat", ({ chat_id, user_id }) => {
+    if (chatRooms.has(chat_id)) {
+      chatRooms.get(chat_id).delete(socket.id);
 
-            if (chatRooms.get(chat_id).size === 0) {
-                chatRooms.delete(chat_id);
-            }
-        }
+      if (chatRooms.get(chat_id).size === 0) {
+        chatRooms.delete(chat_id);
+      }
+    }
 
-        socket.leave(`chat_${chat_id}`);
+    socket.leave(`chat_${chat_id}`);
 
-        console.log(`↩️ Utente ${user_id} ha lasciato la chat ${chat_id}`);
-    });
+    console.log(`↩️ Utente ${user_id} ha lasciato la chat ${chat_id}`);
+  });
 
-    // ------------------------------------------------------------
-    // MESSAGGI REALTIME (CON SALVATAGGIO DB)
-    // ------------------------------------------------------------
-    socket.on("send_message", async ({ chat_id, message }) => {
-        try {
-            const result = await pool.query(
-                `INSERT INTO chat_messages (chat_id, sender_id, content, created_at)
-                 VALUES ($1, $2, $3, $4)
-                 RETURNING *`,
-                [chat_id, message.sender_id, message.content, message.created_at]
-            );
+  // ------------------------------------------------------------
+  // MESSAGGI REALTIME (CON SALVATAGGIO DB)
+  // ------------------------------------------------------------
+  socket.on("send_message", async ({ chat_id, message }) => {
+    try {
+      const result = await pool.query(
+        `INSERT INTO chat_messages (chat_id, sender_id, content, created_at)
+         VALUES ($1, $2, $3, $4)
+         RETURNING *`,
+        [chat_id, message.sender_id, message.content, message.created_at]
+      );
 
-            const saved = result.rows[0];
+      const saved = result.rows[0];
 
-            io.to(`chat_${chat_id}`).emit("new_message", {
-                chat_id,
-                sender_id: saved.sender_id,
-                content: saved.content,
-                created_at: saved.created_at
-            });
+      io.to(`chat_${chat_id}`).emit("new_message", {
+        chat_id,
+        sender_id: saved.sender_id,
+        content: saved.content,
+        created_at: saved.created_at
+      });
 
-            console.log(`📩 Messaggio inoltrato nella chat ${chat_id}`);
-        } catch (err) {
-            console.error("❌ Errore salvataggio messaggio:", err);
-        }
-    });
+      console.log(`📩 Messaggio inoltrato nella chat ${chat_id}`);
+    } catch (err) {
+      console.error("❌ Errore salvataggio messaggio:", err);
+    }
+  });
 
-    // ------------------------------------------------------------
-    // SIGNALING WEBRTC
-    // ------------------------------------------------------------
-    socket.on("offer", ({ toUserId, offer }) => {
-        const target = onlineUsers.get(toUserId);
-        if (target) {
-            io.to(target).emit("offer", { from: socket.userId, offer });
-            console.log(`📡 Offer da ${socket.userId} a ${toUserId}`);
-        }
-    });
+  // ------------------------------------------------------------
+  // SIGNALING WEBRTC
+  // ------------------------------------------------------------
+  socket.on("offer", ({ toUserId, offer }) => {
+    const target = onlineUsers.get(toUserId);
+    if (target) {
+      io.to(target).emit("offer", { from: socket.userId, offer });
+      console.log(`📡 Offer da ${socket.userId} a ${toUserId}`);
+    }
+  });
 
-    socket.on("answer", ({ toUserId, answer }) => {
-        const target = onlineUsers.get(toUserId);
-        if (target) {
-            io.to(target).emit("answer", { from: socket.userId, answer });
-            console.log(`📡 Answer da ${socket.userId} a ${toUserId}`);
-        }
-    });
+  socket.on("answer", ({ toUserId, answer }) => {
+    const target = onlineUsers.get(toUserId);
+    if (target) {
+      io.to(target).emit("answer", { from: socket.userId, answer });
+      console.log(`📡 Answer da ${socket.userId} a ${toUserId}`);
+    }
+  });
 
-    socket.on("ice_candidate", ({ toUserId, candidate }) => {
-        const target = onlineUsers.get(toUserId);
-        if (target) {
-            io.to(target).emit("ice_candidate", { from: socket.userId, candidate });
-            console.log(`❄️ ICE Candidate da ${socket.userId} a ${toUserId}`);
-        }
-    });
+  socket.on("ice_candidate", ({ toUserId, candidate }) => {
+    const target = onlineUsers.get(toUserId);
+    if (target) {
+      io.to(target).emit("ice_candidate", { from: socket.userId, candidate });
+      console.log(`❄️ ICE Candidate da ${socket.userId} a ${toUserId}`);
+    }
+  });
 
-    // ------------------------------------------------------------
-    // DISCONNESSIONE
-    // ------------------------------------------------------------
-    socket.on("disconnect", () => {
-        const userId = socket.userId;
+  // ------------------------------------------------------------
+  // DISCONNESSIONE
+  // ------------------------------------------------------------
+  socket.on("disconnect", () => {
+    const userId = socket.userId;
 
-        if (userId) {
-            onlineUsers.delete(userId);
-            io.emit("user_offline", { userId });
+    if (userId) {
+      onlineUsers.delete(userId);
+      io.emit("user_offline", { userId });
 
-            console.log(`🔴 Utente ${userId} offline`);
-        }
+      console.log(`🔴 Utente ${userId} offline`);
+    }
 
-        for (const [chatId, sockets] of chatRooms.entries()) {
-            sockets.delete(socket.id);
-            if (sockets.size === 0) {
-                chatRooms.delete(chatId);
-            }
-        }
-    });
+    for (const [chatId, sockets] of chatRooms.entries()) {
+      sockets.delete(socket.id);
+      if (sockets.size === 0) {
+        chatRooms.delete(chatId);
+      }
+    }
+  });
 });
-
-
 
 // ------------------------------------------------------------
 // AVVIO SERVER HTTP + WEBSOCKET
@@ -1277,4 +1262,3 @@ io.on("connection", (socket) => {
 httpServer.listen(PORT, () => {
   console.log(`🚀 Server + WebSocket attivi su porta ${PORT}`);
 });
-
