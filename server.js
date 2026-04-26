@@ -18,6 +18,15 @@ import nodemailer from "nodemailer";
 import { createServer } from "http";
 import { Server } from "socket.io";
 
+import admin from "firebase-admin";
+import serviceAccount from "./winkwink-app-firebase-adminsdk-fbsvc-75fec530bf.json" assert { type: "json" };
+
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+
 // 1. CONFIGURAZIONE DB 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -361,7 +370,7 @@ app.post("/chat/invite", async (req, res) => {
 });
 
 // ------------------------------------------------------------
-// P2P SESSION (FILE TRANSFER)
+// P2P SESSION (FILE TRANSFER) — PATCH COMPLETA CON FCM
 // ------------------------------------------------------------
 app.post("/p2p/session/create", async (req, res) => {
   try {
@@ -369,24 +378,55 @@ app.post("/p2p/session/create", async (req, res) => {
 
     const sessionId = "sess_" + Date.now();
 
+    // 1️⃣ CREA SESSIONE
     const result = await pool.query(
       `INSERT INTO p2p_sessions (session_id, from_user_id, to_user_id)
        VALUES ($1, $2, $3) RETURNING *`,
       [sessionId, from_user_id, to_user_id]
     );
 
+    // 2️⃣ SALVA IN INBOX (opzionale, per storico)
     await pool.query(
       `INSERT INTO inbox (to_user_id, from_user_id, type, payload)
        VALUES ($1, $2, 'file_transfer_request', $3)`,
       [to_user_id, from_user_id, { sessionId, fileSize, fileType }]
     );
 
+    // 3️⃣ RECUPERA TOKEN FCM DEL DESTINATARIO
+    const user = await pool.query(
+      "SELECT fcm_token, name FROM users WHERE id = $1",
+      [to_user_id]
+    );
+
+    const token = user.rows[0]?.fcm_token;
+
+    // 4️⃣ INVIA NOTIFICA FCM
+    if (token) {
+      await admin.messaging().send({
+        token,
+        data: {
+          type: "incoming_file",
+          sessionId,
+          senderName: from_user_id.toString(),
+          fileType,
+          fileSize: fileSize.toString()
+        }
+      });
+
+      console.log("📨 Notifica FCM inviata a", to_user_id);
+    } else {
+      console.log("⚠️ Nessun token FCM per l'utente", to_user_id);
+    }
+
+    // 5️⃣ RISPOSTA
     return res.json({ session: result.rows[0] });
 
   } catch (err) {
+    console.error("❌ ERRORE /p2p/session/create:", err);
     return res.status(500).json({ error: err.message });
   }
 });
+
 
 app.post("/p2p/session/offer", async (req, res) => {
   try {
@@ -435,6 +475,31 @@ app.post("/p2p/session/candidate", async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
+
+// ------------------------------------------------------------
+// P2P SESSION — GET SESSION BY ID (MANCANTE)
+// ------------------------------------------------------------
+app.get("/p2p/session/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const result = await pool.query(
+      "SELECT * FROM p2p_sessions WHERE session_id = $1",
+      [sessionId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    return res.json({ session: result.rows[0] });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
 // ------------------------------------------------------------
 // ⭐⭐ P2P CHAT WEBRTC — NUOVA SEZIONE COMPLETA ⭐⭐
 // ------------------------------------------------------------
@@ -1017,6 +1082,30 @@ app.post("/contacts/check", async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+
+// ------------------------------------------------------------
+// endpoint per salvare il token FCM
+// ------------------------------------------------------------
+
+app.post("/users/update-fcm-token", async (req, res) => {
+  try {
+    const { user_id, token } = req.body;
+
+    if (!user_id || !token) {
+      return res.status(400).json({ error: "Missing user_id or token" });
+    }
+
+    await pool.query(
+      "UPDATE users SET fcm_token = $1 WHERE id = $2",
+      [token, user_id]
+    );
+
+    res.json({ status: "ok" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // ------------------------------------------------------------
 // CONTACTS — SYNC COMPLETO (per WinkWink)
