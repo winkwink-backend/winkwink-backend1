@@ -435,6 +435,31 @@ app.post("/p2p/session/candidate", async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
+
+// ------------------------------------------------------------
+// P2P SESSION — GET SESSION BY ID (MANCANTE)
+// ------------------------------------------------------------
+app.get("/p2p/session/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const result = await pool.query(
+      "SELECT * FROM p2p_sessions WHERE session_id = $1",
+      [sessionId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    return res.json({ session: result.rows[0] });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
 // ------------------------------------------------------------
 // ⭐⭐ P2P CHAT WEBRTC — NUOVA SEZIONE COMPLETA ⭐⭐
 // ------------------------------------------------------------
