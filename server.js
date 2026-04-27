@@ -882,7 +882,7 @@ app.post("/update_fcm_token", async (req, res) => {
   }
 
   try {
-    await db.query(
+    await pool.query(
       "UPDATE users SET fcm_token = $1 WHERE id = $2",
       [token, userId]
     );
@@ -905,7 +905,7 @@ app.post("/send_test_notification", async (req, res) => {
   }
 
   try {
-    const result = await db.query(
+    const result = await pool.query(
       "SELECT fcm_token FROM users WHERE id = $1",
       [userId]
     );
