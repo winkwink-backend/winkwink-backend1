@@ -877,19 +877,64 @@ app.post("/chat/send", async (req, res) => {
 app.post("/update_fcm_token", async (req, res) => {
   const { userId, token } = req.body;
 
-  if (!token) {
-    return res.status(400).json({ error: "Token mancante" });
+  if (!userId || !token) {
+    return res.status(400).json({ error: "Parametri mancanti" });
   }
 
-  await db.query(
-    "UPDATE users SET fcm_token = ? WHERE id = ?",
-    [token, userId]
-  );
+  try {
+    await db.query(
+      "UPDATE users SET fcm_token = $1 WHERE id = $2",
+      [token, userId]
+    );
 
-  console.log("🔥 FCM token aggiornato:", userId, token);
+    console.log("🔥 FCM token aggiornato:", userId, token);
 
-  res.json({ success: true });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Errore DB:", err);
+    res.status(500).json({ error: "Errore server" });
+  }
 });
+
+// test
+app.post("/send_test_notification", async (req, res) => {
+  const { userId, message } = req.body;
+
+  if (!userId) return res.status(400).json({ error: "userId mancante" });
+
+  try {
+    const result = await db.query(
+      "SELECT fcm_token FROM users WHERE id = $1",
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Utente non trovato" });
+    }
+
+    const token = result.rows[0].fcm_token;
+
+    if (!token) {
+      return res.status(400).json({ error: "Token FCM mancante" });
+    }
+
+    await sendFCM({
+      token,
+      title: "WinkWink",
+      body: message || "Test notifica",
+      data: {
+        type: "test_notification",
+      },
+    });
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("Errore invio notifica:", e);
+    res.status(500).json({ error: "Errore server" });
+  }
+});
+
+
 
 
 // ------------------------------------------------------------
