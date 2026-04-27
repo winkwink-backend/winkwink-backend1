@@ -12,7 +12,6 @@ import express from "express";
 import multer from "multer";
 import cors from "cors";
 import { exec } from "child_process";
-import fs from "fs";
 import bcrypt from "bcrypt";
 import nodemailer from "nodemailer";
 import { createServer } from "http";
