@@ -19,12 +19,23 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 
 import admin from "firebase-admin";
-import serviceAccount from "./winkwink-app-firebase-adminsdk-fbsvc-75fec530bf.json" assert { type: "json" };
+import fs from "fs";
 
+// 1. Se esiste il file locale, lo usiamo (sviluppo)
+let serviceAccount = null;
+const localPath = "./winkwink-app-firebase-adminsdk-fbsvc-75fec530bf.json";
+
+if (fs.existsSync(localPath)) {
+  serviceAccount = JSON.parse(fs.readFileSync(localPath, "utf8"));
+} else {
+  // 2. Altrimenti siamo in produzione → usiamo la variabile d’ambiente
+  serviceAccount = JSON.parse(process.env.FIREBASE_ADMIN_CREDENTIALS);
+}
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
+
 
 
 // 1. CONFIGURAZIONE DB 
