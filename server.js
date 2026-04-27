@@ -45,6 +45,22 @@ if (serviceAccount) {
   });
 }
 
+async function sendFCM({ token, title, body, data }) {
+  try {
+    await admin.messaging().send({
+      token,
+      notification: {
+        title,
+        body,
+      },
+      data: data || {},
+    });
+
+    console.log("📨 Notifica FCM inviata a", token);
+  } catch (err) {
+    console.error("❌ Errore FCM:", err);
+  }
+}
 
 
 
