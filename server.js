@@ -871,6 +871,28 @@ app.post("/chat/send", async (req, res) => {
 });
 
 // ------------------------------------------------------------
+// endpoint invio file criptato
+// ------------------------------------------------------------
+
+app.post("/update_fcm_token", async (req, res) => {
+  const { userId, token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ error: "Token mancante" });
+  }
+
+  await db.query(
+    "UPDATE users SET fcm_token = ? WHERE id = ?",
+    [token, userId]
+  );
+
+  console.log("🔥 FCM token aggiornato:", userId, token);
+
+  res.json({ success: true });
+});
+
+
+// ------------------------------------------------------------
 // CHAT — LISTA MESSAGGI
 // ------------------------------------------------------------
 app.get("/chat/messages/:chat_id", async (req, res) => {
