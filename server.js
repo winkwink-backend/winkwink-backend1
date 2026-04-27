@@ -20,20 +20,31 @@ import { Server } from "socket.io";
 import admin from "firebase-admin";
 import fs from "fs";
 
-// 1. Se esiste il file locale, lo usiamo (sviluppo)
 let serviceAccount = null;
+
+// Percorsi aggiornati
 const localPath = "./winkwink-app-firebase-adminsdk-fbsvc-75fec530bf.json";
+const renderSecretPath = "/etc/secrets/firebase-key.json"; 
 
 if (fs.existsSync(localPath)) {
+  // Sviluppo locale (sul tuo PC)
   serviceAccount = JSON.parse(fs.readFileSync(localPath, "utf8"));
+  console.log("✅ Firebase: caricato file locale");
+} else if (fs.existsSync(renderSecretPath)) {
+  // Produzione su Render (usando il Secret File che hai caricato)
+  serviceAccount = JSON.parse(fs.readFileSync(renderSecretPath, "utf8"));
+  console.log("✅ Firebase: caricato da Secret File Render");
 } else {
-  // 2. Altrimenti siamo in produzione → usiamo la variabile d’ambiente
-  serviceAccount = JSON.parse(process.env.FIREBASE_ADMIN_CREDENTIALS);
+  console.error("❌ ERRORE CRITICO: File firebase-key.json non trovato!");
+  console.error("Assicurati di averlo caricato su Render con il nome corretto.");
 }
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
+if (serviceAccount) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+}
+
 
 
 
