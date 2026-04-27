@@ -900,7 +900,9 @@ app.post("/update_fcm_token", async (req, res) => {
 app.post("/send_test_notification", async (req, res) => {
   const { userId, message } = req.body;
 
-  if (!userId) return res.status(400).json({ error: "userId mancante" });
+  if (!userId) {
+    return res.status(400).json({ error: "userId mancante" });
+  }
 
   try {
     const result = await db.query(
@@ -915,6 +917,7 @@ app.post("/send_test_notification", async (req, res) => {
     const token = result.rows[0].fcm_token;
 
     if (!token) {
+      console.log(`⚠️ Nessun token FCM per l'utente ${userId}`);
       return res.status(400).json({ error: "Token FCM mancante" });
     }
 
@@ -922,17 +925,16 @@ app.post("/send_test_notification", async (req, res) => {
       token,
       title: "WinkWink",
       body: message || "Test notifica",
-      data: {
-        type: "test_notification",
-      },
+      data: { type: "test_notification" },
     });
 
-    res.json({ success: true });
+    return res.json({ success: true });
   } catch (e) {
     console.error("Errore invio notifica:", e);
-    res.status(500).json({ error: "Errore server" });
+    return res.status(500).json({ error: "Errore server" });
   }
 });
+
 
 
 
