@@ -465,12 +465,16 @@ app.post("/p2p/session/create", async (req, res) => {
     }
 
     // 5️⃣ FALLBACK → FCM
-    const user = await pool.query(
-      "SELECT fcm_token, name FROM users WHERE id = $1",
-      [to_user_id]
+    const sender = await pool.query(
+       "SELECT name FROM users WHERE id = $1",
+      [from_user_id]
+    );
+    const receiver = await pool.query(
+       "SELECT fcm_token FROM users WHERE id = $1",
+       [to_user_id]
     );
 
-    const token = user.rows[0]?.fcm_token;
+    const token = receiver.rows[0]?.fcm_token;
 
     if (token) {
       await admin.messaging().send({
@@ -478,7 +482,7 @@ app.post("/p2p/session/create", async (req, res) => {
         data: {
           type: "incoming_file",
           sessionId,
-          senderName: user.rows[0].name ?? "",
+          senderName: sender.rows[0].name ?? "",
           fileType,
           fileSize: fileSize.toString(),
           i18n_key: "incoming_file_notification"
