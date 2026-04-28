@@ -1480,25 +1480,51 @@ io.on("connection", (socket) => {
   // ------------------------------------------------------------
   // FILE TRANSFER — INCOMING FILE (SOCKET)
   // ------------------------------------------------------------
-  socket.on("file_request", ({ sessionId }) => {
-  const { fromUserId, toUserId } = sessions.get(sessionId);
+  socket.on("file_request", async ({ sessionId }) => {
+    // Recupera la sessione dal DB
+    const result = await pool.query(
+      "SELECT from_user_id, to_user_id FROM p2p_sessions WHERE session_id = $1",
+      [sessionId]
+    );
 
-  const target = onlineUsers.get(toUserId);
+    if (result.rows.length === 0) {
+      console.log("❌ file_request: sessione non trovata");
+      return;
+    }
 
-  if (target) {
-    io.to(target).emit("incoming_file", {
-      sessionId,
-      senderId: fromUserId
-    });
+    const { from_user_id, to_user_id } = result.rows[0];
+    const target = onlineUsers.get(to_user_id);
+
+    if (target) {
+      io.to(target).emit("incoming_file", {
+        sessionId,
+        senderId: from_user_id
+      });
+
+      console.log(`📨 incoming_file → ${to_user_id}`);
+    }
+  });
+
+  // ------------------------------------------------------------
+  // FILE TRANSFER — ACCEPT- Il backend recupera la sessione dal DB -Il backend trova il mittente
+  // Il backend inoltra l’evento file_accept Il mittente riceve l’evento Il mittente invia l’offer WebRTC
+  //Il destinatario riceve l’offer  Il trasferimento parte
+  // ------------------------------------------------------------
+  socket.on("file_accept", async ({ sessionId }) => {
+  const fromUserId = socket.userId; // chi ha accettato
+
+  // Recupera la sessione dal DB
+  const result = await pool.query(
+    "SELECT from_user_id FROM p2p_sessions WHERE session_id = $1",
+    [sessionId]
+  );
+
+  if (result.rows.length === 0) {
+    console.log("❌ file_accept: sessione non trovata");
+    return;
   }
-});
 
-  // ------------------------------------------------------------
-  // FILE TRANSFER — ACCEPT
-  // ------------------------------------------------------------
-  socket.on("file_accept", ({ sessionId }) => {
-  const fromUserId = socket.userId;        // chi ha accettato
-  const toUserId = sessions.get(sessionId).fromUserId; // mittente originale
+  const toUserId = result.rows[0].from_user_id; // mittente originale
 
   const target = onlineUsers.get(toUserId);
 
@@ -1514,11 +1540,25 @@ io.on("connection", (socket) => {
 });
 
 
+
   // ------------------------------------------------------------
   // FILE TRANSFER — REJECT
   // ------------------------------------------------------------
-  socket.on("file_reject", ({ sessionId, fromUserId, toUserId }) => {
-    const target = onlineUsers.get(fromUserId);
+  socket.on("file_reject", async ({ sessionId }) => {
+    const fromUserId = socket.userId;
+
+    const result = await pool.query(
+      "SELECT from_user_id FROM p2p_sessions WHERE session_id = $1",
+      [sessionId]
+    );
+
+    if (result.rows.length === 0) {
+      console.log("❌ file_reject: sessione non trovata");
+      return;
+    }
+
+    const toUserId = result.rows[0].from_user_id;
+    const target = onlineUsers.get(toUserId);
 
     if (target) {
       io.to(target).emit("file_reject", {
@@ -1526,7 +1566,7 @@ io.on("connection", (socket) => {
         i18n_key: "file_transfer_rejected"
       });
 
-      console.log(`❌ file_reject → ${fromUserId}`);
+      console.log(`❌ file_reject → ${toUserId}`);
     }
   });
 
