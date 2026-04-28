@@ -1381,12 +1381,18 @@ io.on("connection", (socket) => {
   // REGISTRAZIONE UTENTE (PRESENZA)
   // ------------------------------------------------------------
   socket.on("register", (userId) => {
-    socket.userId = userId;
-    onlineUsers.set(userId, socket.id);
+  socket.userId = userId;
+  onlineUsers.set(userId, socket.id);
 
-    console.log(`🟢 Utente ${userId} online`);
-    io.emit("user_online", { userId });
+  console.log("🟢 [WS] Utente registrato:", {
+    userId,
+    socketId: socket.id,
+    onlineUsers: Array.from(onlineUsers.entries())
   });
+
+  io.emit("user_online", { userId });
+});
+
 
   // ------------------------------------------------------------
   // ENTRA IN UNA CHAT
@@ -1481,29 +1487,35 @@ io.on("connection", (socket) => {
   // FILE TRANSFER — INCOMING FILE (SOCKET)
   // ------------------------------------------------------------
   socket.on("file_request", async ({ sessionId }) => {
-    // Recupera la sessione dal DB
-    const result = await pool.query(
-      "SELECT from_user_id, to_user_id FROM p2p_sessions WHERE session_id = $1",
-      [sessionId]
-    );
+  console.log("📥 [WS] file_request ricevuto:", sessionId);
 
-    if (result.rows.length === 0) {
-      console.log("❌ file_request: sessione non trovata");
-      return;
-    }
+  const result = await pool.query(
+    "SELECT from_user_id, to_user_id FROM p2p_sessions WHERE session_id = $1",
+    [sessionId]
+  );
 
-    const { from_user_id, to_user_id } = result.rows[0];
-    const target = onlineUsers.get(to_user_id);
+  console.log("🔍 [DB] Risultato file_request:", result.rows);
 
-    if (target) {
-      io.to(target).emit("incoming_file", {
-        sessionId,
-        senderId: from_user_id
-      });
+  if (result.rows.length === 0) {
+    console.log("❌ [WS] file_request: sessione non trovata");
+    return;
+  }
 
-      console.log(`📨 incoming_file → ${to_user_id}`);
-    }
-  });
+  const { from_user_id, to_user_id } = result.rows[0];
+  const target = onlineUsers.get(to_user_id);
+
+  console.log("📡 [WS] Target file_request:", target);
+
+  if (target) {
+    io.to(target).emit("incoming_file", {
+      sessionId,
+      senderId: from_user_id
+    });
+
+    console.log(`📨 [WS] incoming_file → ${to_user_id}`);
+  }
+});
+
 
   // ------------------------------------------------------------
   // FILE TRANSFER — ACCEPT- Il backend recupera la sessione dal DB -Il backend trova il mittente
@@ -1511,7 +1523,13 @@ io.on("connection", (socket) => {
   //Il destinatario riceve l’offer  Il trasferimento parte
   // ------------------------------------------------------------
   socket.on("file_accept", async ({ sessionId }) => {
-  const fromUserId = socket.userId; // chi ha accettato
+  console.log("📥 [WS] file_accept ricevuto dal client:", {
+    socketId: socket.id,
+    userId: socket.userId,
+    sessionId
+  });
+
+  const fromUserId = socket.userId;
 
   // Recupera la sessione dal DB
   const result = await pool.query(
@@ -1519,14 +1537,18 @@ io.on("connection", (socket) => {
     [sessionId]
   );
 
+  console.log("🔍 [DB] Risultato query sessione:", result.rows);
+
   if (result.rows.length === 0) {
-    console.log("❌ file_accept: sessione non trovata");
+    console.log("❌ [WS] file_accept: sessione non trovata nel DB");
     return;
   }
 
-  const toUserId = result.rows[0].from_user_id; // mittente originale
+  const toUserId = result.rows[0].from_user_id;
+  console.log("🎯 [WS] Mittente originale:", toUserId);
 
   const target = onlineUsers.get(toUserId);
+  console.log("📡 [WS] Socket target:", target);
 
   if (target) {
     io.to(target).emit("file_accept", {
@@ -1535,9 +1557,12 @@ io.on("connection", (socket) => {
       toUserId
     });
 
-    console.log(`✅ file_accept → ${toUserId}`);
+    console.log(`✅ [WS] file_accept inoltrato → socket ${target}`);
+  } else {
+    console.log("⚠️ [WS] Mittente offline, impossibile inoltrare file_accept");
   }
 });
+
 
 
 
