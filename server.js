@@ -388,38 +388,8 @@ app.post("/inbox/create", async (req, res) => {
 // ------------------------------------------------------------
 // CHAT INVITE — INVITA UN UTENTE AD UNA CHAT ESISTENTE
 // ------------------------------------------------------------
-app.post("/chat/invite", async (req, res) => {
-  try {
-    const { from_user_id, to_user_id, chat_with } = req.body;
-
-    if (!from_user_id || !to_user_id || !chat_with) {
-      return res.status(400).json({ error: "Missing fields" });
-    }
-
-    const payload = {
-      type: "chat_invite",
-      from_user_id,
-      chat_with,
-      message: "Ti hanno invitato in una chat"
-    };
-
-    const result = await pool.query(
-      `INSERT INTO inbox (to_user_id, from_user_id, type, payload)
-       VALUES ($1, $2, 'chat_invite', $3)
-       RETURNING *`,
-      [to_user_id, from_user_id, payload]
-    );
-
-    return res.json({ status: "ok", invite: result.rows[0] });
-
-  } catch (err) {
-    console.error("CHAT INVITE ERROR:", err);
-    return res.status(500).json({ error: "Server error" });
-  }
-});
-
 // ------------------------------------------------------------
-// P2P SESSION (FILE TRANSFER) — PATCH COMPLETA CON FCM
+// P2P SESSION (FILE TRANSFER) — VERSIONE CORRETTA
 // ------------------------------------------------------------
 app.post("/p2p/session/create", async (req, res) => {
   try {
@@ -427,22 +397,22 @@ app.post("/p2p/session/create", async (req, res) => {
 
     const sessionId = "sess_" + Date.now();
 
-    // 1️⃣ CREA SESSIONE
+    // 1️⃣ CREA SESSIONE (mittente = from_user_id)
     const result = await pool.query(
       `INSERT INTO p2p_sessions (session_id, from_user_id, to_user_id)
        VALUES ($1, $2, $3) RETURNING *`,
       [sessionId, from_user_id, to_user_id]
     );
 
-    // 2️⃣ SALVA IN INBOX (opzionale)
+    // 2️⃣ SALVA IN INBOX
     await pool.query(
       `INSERT INTO inbox (to_user_id, from_user_id, type, payload)
        VALUES ($1, $2, 'file_transfer_request', $3)`,
       [to_user_id, from_user_id, { sessionId, fileSize, fileType }]
     );
 
-    // 3️⃣ PRESENCE CHECK (socket)
-    const targetSocket = onlineUsers.get(to_user_id);   // ⭐ MANCAVA QUESTA RIGA
+    // 3️⃣ PRESENCE CHECK
+    const targetSocket = onlineUsers.get(to_user_id);
 
     if (targetSocket) {
       // 4️⃣ INVIO DIRETTO VIA SOCKET
@@ -466,12 +436,13 @@ app.post("/p2p/session/create", async (req, res) => {
 
     // 5️⃣ FALLBACK → FCM
     const sender = await pool.query(
-       "SELECT name FROM users WHERE id = $1",
+      "SELECT name FROM users WHERE id = $1",
       [from_user_id]
     );
+
     const receiver = await pool.query(
-       "SELECT fcm_token FROM users WHERE id = $1",
-       [to_user_id]
+      "SELECT fcm_token FROM users WHERE id = $1",
+      [to_user_id]
     );
 
     const token = receiver.rows[0]?.fcm_token;
@@ -498,7 +469,7 @@ app.post("/p2p/session/create", async (req, res) => {
       });
     }
 
-    // 6️⃣ UTENTE OFFLINE (NESSUN SOCKET, NESSUN FCM)
+    // 6️⃣ UTENTE OFFLINE
     console.log(`⚠️ Utente ${to_user_id} offline e senza FCM`);
 
     return res.json({
@@ -512,6 +483,7 @@ app.post("/p2p/session/create", async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
 
 
 
