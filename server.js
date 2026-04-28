@@ -442,6 +442,7 @@ app.post("/p2p/session/create", async (req, res) => {
     );
 
     // 3️⃣ PRESENCE CHECK (socket)
+    const targetSocket = onlineUsers.get(to_user_id);   // ⭐ MANCAVA QUESTA RIGA
 
     if (targetSocket) {
       // 4️⃣ INVIO DIRETTO VIA SOCKET
@@ -507,6 +508,7 @@ app.post("/p2p/session/create", async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
 
 
 
