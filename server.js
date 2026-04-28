@@ -25,7 +25,7 @@ let serviceAccount = null;
 // Percorsi aggiornati
 const localPath = "./winkwink-app-firebase-adminsdk-fbsvc-75fec530bf.json";
 const renderSecretPath = "/etc/secrets/firebase-key.json"; 
-const onlineUsers = {}; // userId → socketId
+
 
 
 if (fs.existsSync(localPath)) {
@@ -442,7 +442,6 @@ app.post("/p2p/session/create", async (req, res) => {
     );
 
     // 3️⃣ PRESENCE CHECK (socket)
-    const targetSocket = onlineUsers.get(to_user_id);
 
     if (targetSocket) {
       // 4️⃣ INVIO DIRETTO VIA SOCKET
