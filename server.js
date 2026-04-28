@@ -744,6 +744,57 @@ app.get("/files/download/:id", async (req, res) => {
 });
 
 // ------------------------------------------------------------
+// ⭐ ACCEPT SESSION (fallback HTTP)
+// ------------------------------------------------------------
+app.post("/p2p/session/accept", async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({ error: "Missing sessionId" });
+    }
+
+    console.log(`📥 [HTTP ACCEPT] sessionId=${sessionId}`);
+
+    // 1️⃣ Recupera la sessione dal DB
+    const result = await pool.query(
+      "SELECT from_user_id, to_user_id FROM p2p_sessions WHERE session_id = $1",
+      [sessionId]
+    );
+
+    if (result.rows.length === 0) {
+      console.log("❌ Sessione non trovata");
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    const { from_user_id, to_user_id } = result.rows[0];
+
+    // 2️⃣ Trova il socket del mittente (user1)
+    const senderSocket = onlineUsers.get(from_user_id);
+
+    if (senderSocket) {
+      console.log(`📨 Inoltro ACCEPT via SOCKET → user ${from_user_id}`);
+
+      io.to(senderSocket).emit("file_accept", {
+        sessionId,
+        fromUserId: to_user_id,
+        toUserId: from_user_id,
+      });
+    } else {
+      console.log(`⚠️ Mittente offline → niente socket`);
+    }
+
+    // 3️⃣ Risposta al client
+    return res.json({ success: true });
+
+  } catch (err) {
+    console.error("❌ ERRORE /p2p/session/accept:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ------------------------------------------------------------
 // MESSAGING
 // ------------------------------------------------------------
 app.post("/send-message", async (req, res) => {
