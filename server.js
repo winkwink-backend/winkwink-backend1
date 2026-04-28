@@ -25,6 +25,8 @@ let serviceAccount = null;
 // Percorsi aggiornati
 const localPath = "./winkwink-app-firebase-adminsdk-fbsvc-75fec530bf.json";
 const renderSecretPath = "/etc/secrets/firebase-key.json"; 
+const onlineUsers = {}; // userId → socketId
+
 
 if (fs.existsSync(localPath)) {
   // Sviluppo locale (sul tuo PC)
@@ -49,10 +51,19 @@ async function sendFCM({ token, title, body, data }) {
   try {
     await admin.messaging().send({
       token,
+
       notification: {
         title,
         body,
       },
+
+      // ⭐ NECESSARIO PER ANDROID
+      android: {
+        notification: {
+          click_action: "FLUTTER_NOTIFICATION_CLICK",
+        }
+      },
+
       data: data || {},
     });
 
@@ -61,6 +72,7 @@ async function sendFCM({ token, title, body, data }) {
     console.error("❌ Errore FCM:", err);
   }
 }
+
 
 
 
@@ -422,14 +434,37 @@ app.post("/p2p/session/create", async (req, res) => {
       [sessionId, from_user_id, to_user_id]
     );
 
-    // 2️⃣ SALVA IN INBOX (opzionale, per storico)
+    // 2️⃣ SALVA IN INBOX (opzionale)
     await pool.query(
       `INSERT INTO inbox (to_user_id, from_user_id, type, payload)
        VALUES ($1, $2, 'file_transfer_request', $3)`,
       [to_user_id, from_user_id, { sessionId, fileSize, fileType }]
     );
 
-    // 3️⃣ RECUPERA TOKEN FCM DEL DESTINATARIO
+    // 3️⃣ PRESENCE CHECK (socket)
+    const targetSocket = onlineUsers.get(to_user_id);
+
+    if (targetSocket) {
+      // 4️⃣ INVIO DIRETTO VIA SOCKET
+      io.to(targetSocket).emit("incoming_file", {
+        type: "incoming_file",
+        sessionId,
+        senderId: from_user_id,
+        fileSize,
+        fileType,
+        i18n_key: "incoming_file_popup"
+      });
+
+      console.log(`📨 incoming_file via SOCKET → utente ${to_user_id}`);
+
+      return res.json({
+        delivered: "socket",
+        session: result.rows[0],
+        i18n_key: "file_transfer_waiting_accept"
+      });
+    }
+
+    // 5️⃣ FALLBACK → FCM
     const user = await pool.query(
       "SELECT fcm_token, name FROM users WHERE id = $1",
       [to_user_id]
@@ -437,32 +472,43 @@ app.post("/p2p/session/create", async (req, res) => {
 
     const token = user.rows[0]?.fcm_token;
 
-    // 4️⃣ INVIA NOTIFICA FCM
     if (token) {
       await admin.messaging().send({
         token,
         data: {
           type: "incoming_file",
           sessionId,
-          senderName: from_user_id.toString(),
+          senderName: user.rows[0].name ?? "",
           fileType,
-          fileSize: fileSize.toString()
+          fileSize: fileSize.toString(),
+          i18n_key: "incoming_file_notification"
         }
       });
 
-      console.log("📨 Notifica FCM inviata a", to_user_id);
-    } else {
-      console.log("⚠️ Nessun token FCM per l'utente", to_user_id);
+      console.log(`📨 incoming_file via FCM → utente ${to_user_id}`);
+
+      return res.json({
+        delivered: "fcm",
+        session: result.rows[0],
+        i18n_key: "file_transfer_waiting_accept"
+      });
     }
 
-    // 5️⃣ RISPOSTA
-    return res.json({ session: result.rows[0] });
+    // 6️⃣ UTENTE OFFLINE (NESSUN SOCKET, NESSUN FCM)
+    console.log(`⚠️ Utente ${to_user_id} offline e senza FCM`);
+
+    return res.json({
+      delivered: "none",
+      error: "user_offline",
+      i18n_key: "error_user_offline"
+    });
 
   } catch (err) {
     console.error("❌ ERRORE /p2p/session/create:", err);
     return res.status(500).json({ error: err.message });
   }
 });
+
 
 
 app.post("/p2p/session/offer", async (req, res) => {
@@ -1338,7 +1384,6 @@ io.on("connection", (socket) => {
     onlineUsers.set(userId, socket.id);
 
     console.log(`🟢 Utente ${userId} online`);
-
     io.emit("user_online", { userId });
   });
 
@@ -1372,7 +1417,6 @@ io.on("connection", (socket) => {
     }
 
     socket.leave(`chat_${chat_id}`);
-
     console.log(`↩️ Utente ${user_id} ha lasciato la chat ${chat_id}`);
   });
 
@@ -1381,7 +1425,6 @@ io.on("connection", (socket) => {
   // ------------------------------------------------------------
   socket.on("send_message", async ({ chat_id, message }) => {
     try {
-      // Inseriamo solo le colonne base. created_at lo mette il DB da solo.
       const result = await pool.query(
         `INSERT INTO chat_messages (chat_id, sender_id, content)
          VALUES ($1, $2, $3)
@@ -1391,26 +1434,23 @@ io.on("connection", (socket) => {
 
       const saved = result.rows[0];
 
-      // Invio immediato ai dispositivi
       io.to(`chat_${chat_id}`).emit("new_message", {
         chat_id: parseInt(chat_id),
         sender_id: saved.sender_id,
         receiver_id: message.receiver_id ?? null,
         content: saved.content,
         type: message.type ?? "text",
-        created_at: saved.created_at // Usiamo quella restituita dal DB
+        created_at: saved.created_at
       });
 
       console.log(`✅ Messaggio Realtime inviato: Chat ${chat_id}`);
     } catch (err) {
-      // Questo print ti dirà esattamente quale colonna manca se l'errore persiste
       console.error("❌ ERRORE SQL NEL SOCKET:", err.message);
     }
   });
 
-
   // ------------------------------------------------------------
-  // SIGNALING WEBRTC
+  // SIGNALING WEBRTC (CHAT)
   // ------------------------------------------------------------
   socket.on("offer", ({ toUserId, offer }) => {
     const target = onlineUsers.get(toUserId);
@@ -1437,6 +1477,59 @@ io.on("connection", (socket) => {
   });
 
   // ------------------------------------------------------------
+  // FILE TRANSFER — INCOMING FILE (SOCKET)
+  // ------------------------------------------------------------
+  socket.on("file_request", ({ sessionId }) => {
+  const { fromUserId, toUserId } = sessions.get(sessionId);
+
+  const target = onlineUsers.get(toUserId);
+
+  if (target) {
+    io.to(target).emit("incoming_file", {
+      sessionId,
+      senderId: fromUserId
+    });
+  }
+});
+
+  // ------------------------------------------------------------
+  // FILE TRANSFER — ACCEPT
+  // ------------------------------------------------------------
+  socket.on("file_accept", ({ sessionId }) => {
+  const fromUserId = socket.userId;        // chi ha accettato
+  const toUserId = sessions.get(sessionId).fromUserId; // mittente originale
+
+  const target = onlineUsers.get(toUserId);
+
+  if (target) {
+    io.to(target).emit("file_accept", {
+      sessionId,
+      fromUserId,
+      toUserId
+    });
+
+    console.log(`✅ file_accept → ${toUserId}`);
+  }
+});
+
+
+  // ------------------------------------------------------------
+  // FILE TRANSFER — REJECT
+  // ------------------------------------------------------------
+  socket.on("file_reject", ({ sessionId, fromUserId, toUserId }) => {
+    const target = onlineUsers.get(fromUserId);
+
+    if (target) {
+      io.to(target).emit("file_reject", {
+        sessionId,
+        i18n_key: "file_transfer_rejected"
+      });
+
+      console.log(`❌ file_reject → ${fromUserId}`);
+    }
+  });
+
+  // ------------------------------------------------------------
   // DISCONNESSIONE
   // ------------------------------------------------------------
   socket.on("disconnect", () => {
@@ -1457,6 +1550,8 @@ io.on("connection", (socket) => {
     }
   });
 });
+
+
 
 // ------------------------------------------------------------
 // AVVIO SERVER HTTP + WEBSOCKET
