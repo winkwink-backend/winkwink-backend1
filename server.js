@@ -746,7 +746,7 @@ app.post("/p2p/session/accept", async (req, res) => {
     const { from_user_id, to_user_id } = result.rows[0];
 
     // 2️⃣ Trova il socket del mittente (user1)
-    const senderSocket = onlineUsers.get(from_user_id);
+    const senderSocket = onlineUsers.get(Number(from_user_id));
 
     if (senderSocket) {
       console.log(`📨 Inoltro ACCEPT via SOCKET → user ${from_user_id}`);
