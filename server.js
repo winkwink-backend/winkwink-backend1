@@ -1553,19 +1553,41 @@ io.on("connection", (socket) => {
 });
 
 // 🔥 Mittente chiede al destinatario di aprire la DownloadPage
-  socket.on('open_download_page', (data) => {
+  socket.on('open_download_page', async (data) => {
     const { toUserId, payload } = data;
     const targetSocketId = onlineUsers.get(toUserId);
 
-    if (!targetSocketId) {
-      console.log('open_download_page: utente non online', toUserId);
-      return;
+    if (targetSocketId) {
+        // ⭐ App aperta → socket
+        io.to(targetSocketId).emit('open_download_page', payload);
+        return;
     }
 
-    console.log('📨 Inoltro OPEN_DOWNLOAD_PAGE → user', toUserId, payload);
+    // ⭐ App chiusa → FCM
+    console.log('📱 Utente offline, invio PUSH via Firebase a:', toUserId);
 
-    io.to(targetSocketId).emit('open_download_page', payload);
-  });
+    const userQuery = await pool.query(
+        "SELECT fcm_token FROM users WHERE id = $1",
+        [toUserId]
+    );
+
+    const token = userQuery.rows[0]?.fcm_token;
+
+    if (token) {
+        await admin.messaging().send({
+            token: token,
+            data: {
+                type: "incoming_file",
+                sessionId: payload.sessionId,
+                fileName: payload.fileName,
+                senderId: payload.senderId
+            },
+            android: { priority: "high" }
+        });
+    } else {
+        console.log("❌ Token FCM non trovato");
+    }
+});
 
 
   // ------------------------------------------------------------
