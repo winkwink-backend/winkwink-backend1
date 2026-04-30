@@ -445,20 +445,16 @@ app.post("/p2p/session/create", async (req, res) => {
     if (token) {
       if (token) {
        await admin.messaging().send({
-        token,
+        token: token,
         data: {
           type: "incoming_file",
-          title: "WinkWink",
-          body: `${sender.rows[0].name} vuole inviarti un file`,
-          sessionId: sessionId,
-          fileName: "file",
-          senderId: from_user_id.toString(),
-          fileType: fileType,
-          fileSize: fileSize.toString()
+          sessionId: String(payload.sessionId),
+          fileName: String(payload.fileName),
+          fileType: String(payload.fileType),
+          fileSize: String(payload.fileSize),
+          senderId: String(payload.fromUserId)
         },
-        android: {
-          priority: "high"
-        }
+        android: { priority: "high" }
       });
     }
     
