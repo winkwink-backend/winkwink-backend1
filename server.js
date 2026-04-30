@@ -990,48 +990,6 @@ app.post("/update_fcm_token", async (req, res) => {
   }
 });
 
-// test
-app.post("/send_test_notification", async (req, res) => {
-  const { userId, message } = req.body;
-
-  if (!userId) {
-    return res.status(400).json({ error: "userId mancante" });
-  }
-
-  try {
-    const result = await pool.query(
-      "SELECT fcm_token FROM users WHERE id = $1",
-      [userId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Utente non trovato" });
-    }
-
-    const token = result.rows[0].fcm_token;
-
-    if (!token) {
-      console.log(`⚠️ Nessun token FCM per l'utente ${userId}`);
-      return res.status(400).json({ error: "Token FCM mancante" });
-    }
-
-    await sendFCM({
-      token,
-      title: "WinkWink",
-      body: message || "Test notifica",
-      data: { type: "test_notification" },
-    });
-
-    return res.json({ success: true });
-  } catch (e) {
-    console.error("Errore invio notifica:", e);
-    return res.status(500).json({ error: "Errore server" });
-  }
-});
-
-
-
-
 
 // ------------------------------------------------------------
 // CHAT — LISTA MESSAGGI
@@ -1630,13 +1588,40 @@ io.on("connection", (socket) => {
     const target = onlineUsers.get(toUserId);
 
     if (target) {
-      io.to(target).emit("file_reject", {
-        sessionId,
-        i18n_key: "file_transfer_rejected"
-      });
+  // ⭐ Utente online → invio via WebSocket
+  io.to(target).emit("incoming_file", {
+    sessionId,
+    senderId: from_user_id
+  });
 
-      console.log(`❌ file_reject → ${toUserId}`);
-    }
+  console.log(`📨 [WS] incoming_file → ${to_user_id}`);
+} else {
+  // ⭐ Utente offline → invio FCM
+  console.log("📵 Utente offline → invio FCM");
+
+  const tokenResult = await pool.query(
+    "SELECT fcm_token FROM users WHERE id = $1",
+    [to_user_id]
+  );
+
+  const token = tokenResult.rows[0]?.fcm_token;
+
+  if (token) {
+    await sendFCM({
+      token,
+      data: {
+        sessionId,
+        fileName: "file.jpg",   // ← qui metti il nome reale
+        senderId: from_user_id
+      }
+    });
+
+    console.log("📨 FCM inviata a", to_user_id);
+  } else {
+    console.log("⚠️ Nessun token FCM per", to_user_id);
+  }
+}
+
   });
 
   // ------------------------------------------------------------
