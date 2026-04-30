@@ -456,6 +456,7 @@ app.post("/p2p/session/create", async (req, res) => {
         },
         android: { priority: "high" }
       });
+    
     }
     
 
@@ -1571,15 +1572,17 @@ io.on("connection", (socket) => {
 
     if (token) {
         await admin.messaging().send({
-            token: token,
-            data: {
-                type: "incoming_file",
-                sessionId: payload.sessionId,
-                fileName: payload.fileName,
-                senderId: payload.senderId
-            },
-            android: { priority: "high" }
-        });
+         token,
+         data: {
+           type: "incoming_file",
+           sessionId: String(payload.sessionId ?? ""),
+           fileName: String(payload.fileName ?? ""),
+           fileType: String(payload.fileType ?? ""),
+           fileSize: String(payload.fileSize ?? ""),
+           fromUserId: String(payload.fromUserId ?? "")
+          },
+         android: { priority: "high" }
+      });
     } else {
         console.log("❌ Token FCM non trovato");
     }
@@ -1609,7 +1612,7 @@ io.on("connection", (socket) => {
   // ⭐ Utente online → invio via WebSocket
   io.to(target).emit("incoming_file", {
     sessionId,
-    senderId: from_user_id
+    fromUserId: from_user_id
   });
 
   console.log(`📨 [WS] incoming_file → ${to_user_id}`);
