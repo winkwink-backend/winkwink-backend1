@@ -443,28 +443,25 @@ app.post("/p2p/session/create", async (req, res) => {
     const token = receiver.rows[0]?.fcm_token;
 
     if (token) {
-      await admin.messaging().send({
-       token,
-       notification: {
-       title: "WinkWink",
-       body: `${sender.rows[0].name} vuole inviarti un file`
-      },
-      data: {
-        type: "incoming_file",
-        sessionId: sessionId,
-        fileName: "file",        // se non hai il nome, metti un placeholder
-        senderId: from_user_id.toString(),
-        fileType: fileType,
-        fileSize: fileSize.toString()
-      },
-      android: {
-        priority: "high",
-        notification: {
-        channelId: "winkwink_download_channel",
-        clickAction: "FLUTTER_NOTIFICATION_CLICK"
-       }
+      if (token) {
+       await admin.messaging().send({
+        token,
+        data: {
+          type: "incoming_file",
+          title: "WinkWink",
+          body: `${sender.rows[0].name} vuole inviarti un file`,
+          sessionId: sessionId,
+          fileName: "file",
+          senderId: from_user_id.toString(),
+          fileType: fileType,
+          fileSize: fileSize.toString()
+        },
+        android: {
+          priority: "high"
+        }
       });
-     }
+    }
+    
 
 
       console.log(`📨 incoming_file via FCM → utente ${to_user_id}`);
