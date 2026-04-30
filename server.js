@@ -51,27 +51,22 @@ async function sendFCM({ token, title, body, data }) {
   try {
     await admin.messaging().send({
       token,
-
-      notification: {
-        title,
-        body,
+      data: {
+        title: title || "WinkWink",
+        body: body || "",
+        ...(data || {})
       },
-
-      // ⭐ NECESSARIO PER ANDROID
       android: {
-        notification: {
-          click_action: "FLUTTER_NOTIFICATION_CLICK",
-        }
-      },
-
-      data: data || {},
+        priority: "high"
+      }
     });
 
-    console.log("📨 Notifica FCM inviata a", token);
+    console.log("📨 FCM DATA-ONLY inviata a", token);
   } catch (err) {
     console.error("❌ Errore FCM:", err);
   }
 }
+
 
 
 
@@ -468,8 +463,8 @@ app.post("/p2p/session/create", async (req, res) => {
         channelId: "winkwink_download_channel",
         clickAction: "FLUTTER_NOTIFICATION_CLICK"
        }
+      });
      }
-    });
 
 
       console.log(`📨 incoming_file via FCM → utente ${to_user_id}`);
