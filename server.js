@@ -1361,6 +1361,12 @@ const onlineUsers = new Map();
 const chatRooms = new Map();
 
 io.on("connection", (socket) => {
+  console.log("🔌 Nuova connessione WebSocket:", socket.id);
+
+  // ------------------------------------------------------------
+  // REGISTRAZIONE UTENTE (PRESENZA)
+  // ------------------------------------------------------------
+  io.on("connection", (socket) => {
   console.log("🔌 [WS] Nuova connessione:", socket.id);
 
   // ------------------------------------------------------------
@@ -1693,6 +1699,7 @@ io.on("connection", (socket) => {
       }
     }
   });
+});
 
 
 
