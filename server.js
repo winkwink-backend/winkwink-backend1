@@ -1605,21 +1605,29 @@ io.on("connection", (socket) => {
     const token = userQuery.rows[0]?.fcm_token;
 
     if (token) {
-        await admin.messaging().send({
-         token,
-         data: {
-           type: "incoming_file",
-           sessionId: String(payload.sessionId ?? ""),
-           fileName: String(payload.fileName ?? ""),
-           fileType: String(payload.fileType ?? ""),
-           fileSize: String(payload.fileSize ?? ""),
-           fromUserId: String(payload.fromUserId ?? "")
-          },
-         android: { priority: "high" }
-      });
-    } else {
-        console.log("❌ Token FCM non trovato");
+    try {
+        const response = await admin.messaging().send({
+            token,
+            data: {
+                type: "incoming_file",
+                sessionId: String(payload.sessionId ?? ""),
+                fileName: String(payload.fileName ?? ""),
+                fileType: String(payload.fileType ?? ""),
+                fileSize: String(payload.fileSize ?? ""),
+                fromUserId: String(payload.fromUserId ?? "")
+            },
+            android: { 
+                priority: "high" 
+            }
+        });
+        console.log("✅ Firebase ha accettato il messaggio. ID:", response);
+    } catch (error) {
+        console.error("❌ Errore durante l'invio a Firebase:", error.code, error.message);
     }
+} else {
+    console.log("❌ Token FCM non trovato nel database per questo utente");
+}
+
 });
 
 
