@@ -1361,23 +1361,51 @@ const onlineUsers = new Map();
 const chatRooms = new Map();
 
 io.on("connection", (socket) => {
-  console.log("🔌 Nuova connessione WebSocket:", socket.id);
+  console.log("🔌 [WS] Nuova connessione:", socket.id);
+
+  // ------------------------------------------------------------
+  // LOG DISCONNESSIONE
+  // ------------------------------------------------------------
+  socket.on("disconnect", (reason) => {
+    console.log("🔴 [WS] Disconnessione:", {
+      socketId: socket.id,
+      userId: socket.userId,
+      reason
+    });
+
+    if (socket.userId) {
+      onlineUsers.delete(socket.userId);
+      console.log("📉 [WS] Utente rimosso da onlineUsers:", {
+        userId: socket.userId,
+        onlineUsers: Array.from(onlineUsers.entries())
+      });
+
+      io.emit("user_offline", { userId: socket.userId });
+    }
+  });
 
   // ------------------------------------------------------------
   // REGISTRAZIONE UTENTE (PRESENZA)
   // ------------------------------------------------------------
   socket.on("register", (userId) => {
-  socket.userId = userId;
-  onlineUsers.set(userId, socket.id);
+    console.log("📝 [WS] REGISTER ricevuto:", {
+      userId,
+      socketId: socket.id
+    });
 
-  console.log("🟢 [WS] Utente registrato:", {
-    userId,
-    socketId: socket.id,
-    onlineUsers: Array.from(onlineUsers.entries())
+    socket.userId = userId;
+    onlineUsers.set(userId, socket.id);
+
+    console.log("🟢 [WS] Utente registrato:", {
+      userId,
+      socketId: socket.id,
+      onlineUsers: Array.from(onlineUsers.entries())
+    });
+
+    io.emit("user_online", { userId });
   });
-
-  io.emit("user_online", { userId });
 });
+
 
 
   // ------------------------------------------------------------
