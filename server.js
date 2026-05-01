@@ -1589,45 +1589,56 @@ io.on("connection", (socket) => {
     const targetSocketId = onlineUsers.get(toUserId);
 
     if (targetSocketId) {
-        // ⭐ App aperta → socket
+        // ⭐ App aperta: invio via WebSocket
         io.to(targetSocketId).emit('open_download_page', payload);
         return;
     }
 
-    // ⭐ App chiusa → FCM
+    // ⭐ App chiusa: invio via Firebase (FCM)
     console.log('📱 Utente offline, invio PUSH via Firebase a:', toUserId);
 
-    const userQuery = await pool.query(
-        "SELECT fcm_token FROM users WHERE id = $1",
-        [toUserId]
-    );
-
-    const token = userQuery.rows[0]?.fcm_token;
-
-    if (token) {
     try {
-        const response = await admin.messaging().send({
-            token,
-            data: {
-                type: "incoming_file",
-                sessionId: String(payload.sessionId ?? ""),
-                fileName: String(payload.fileName ?? ""),
-                fileType: String(payload.fileType ?? ""),
-                fileSize: String(payload.fileSize ?? ""),
-                fromUserId: String(payload.fromUserId ?? "")
-            },
-            android: { 
-                priority: "high" 
-            }
-        });
-        console.log("✅ Firebase ha accettato il messaggio. ID:", response);
-    } catch (error) {
-        console.error("❌ Errore durante l'invio a Firebase:", error.code, error.message);
-    }
-} else {
-    console.log("❌ Token FCM non trovato nel database per questo utente");
-}
+        const userQuery = await pool.query(
+            "SELECT fcm_token FROM users WHERE id = $1",
+            [toUserId]
+        );
 
+        const token = userQuery.rows[0]?.fcm_token;
+
+        if (token) {
+            const response = await admin.messaging().send({
+                token,
+                // 🔔 AGGIUNTO: Questo genera il banner visibile su Android/iOS
+                notification: {
+                    title: "Nuovo file in arrivo",
+                    body: `Stai ricevendo: ${payload.fileName ?? "un file"}`
+                },
+                // 📦 DATI: Rimangono per la logica interna dell'app
+                data: {
+                    type: "incoming_file",
+                    sessionId: String(payload.sessionId ?? ""),
+                    fileName: String(payload.fileName ?? ""),
+                    fileType: String(payload.fileType ?? ""),
+                    fileSize: String(payload.fileSize ?? ""),
+                    fromUserId: String(payload.fromUserId ?? ""),
+                    click_action: "FLUTTER_NOTIFICATION_CLICK" // Aiuta Flutter a gestire il click
+                },
+                android: {
+                    priority: "high",
+                    notification: {
+                        channelId: "high_importance_channel", // Assicurati che esista nel frontend
+                        icon: "stock_ticker_update",
+                        color: "#7e57c2"
+                    }
+                }
+            });
+            console.log("✅ Firebase ha accettato il messaggio. ID:", response);
+        } else {
+            console.log("❌ Token FCM non trovato nel database per l'utente:", toUserId);
+        }
+    } catch (error) {
+        console.error("❌ Errore durante il processo di invio Push:", error.code, error.message);
+    }
 });
 
 
