@@ -445,17 +445,17 @@ app.post("/p2p/session/create", async (req, res) => {
     if (token) {
       if (token) {
        await admin.messaging().send({
-        token: token,
-        data: {
-          type: "incoming_file",
-          sessionId: String(payload.sessionId),
-          fileName: String(payload.fileName),
-          fileType: String(payload.fileType),
-          fileSize: String(payload.fileSize),
-          senderId: String(payload.fromUserId)
-        },
-        android: { priority: "high" }
-      });
+          token: token,
+          data: {
+            type: "incoming_file",
+            sessionId: String(sessionId),
+            fileName: "", // opzionale, non lo hai qui
+           fileType: String(fileType ?? ""),
+           fileSize: String(fileSize ?? ""),
+           senderId: String(from_user_id)
+          },
+          android: { priority: "high" }
+        });
     
     }
     
@@ -1584,7 +1584,7 @@ io.on("connection", (socket) => {
 });
 
 // 🔥 Mittente chiede al destinatario di aprire la DownloadPage
-  socket.on('open_download_page', async (data) => {
+socket.on('open_download_page', async (data) => {
     const { toUserId, payload } = data;
     const targetSocketId = onlineUsers.get(toUserId);
 
@@ -1608,30 +1608,22 @@ io.on("connection", (socket) => {
         if (token) {
             const response = await admin.messaging().send({
                 token,
-                // 🔔 AGGIUNTO: Questo genera il banner visibile su Android/iOS
-                notification: {
-                    title: "Nuovo file in arrivo",
-                    body: `Stai ricevendo: ${payload.fileName ?? "un file"}`
-                },
-                // 📦 DATI: Rimangono per la logica interna dell'app
+
+                // ✅ SOLO DATA → arriva al tuo FirebaseService
                 data: {
                     type: "incoming_file",
                     sessionId: String(payload.sessionId ?? ""),
                     fileName: String(payload.fileName ?? ""),
                     fileType: String(payload.fileType ?? ""),
                     fileSize: String(payload.fileSize ?? ""),
-                    fromUserId: String(payload.fromUserId ?? ""),
-                    click_action: "FLUTTER_NOTIFICATION_CLICK" // Aiuta Flutter a gestire il click
+                    fromUserId: String(payload.fromUserId ?? "")
                 },
+
                 android: {
-                    priority: "high",
-                    notification: {
-                        channelId: "high_importance_channel", // Assicurati che esista nel frontend
-                        icon: "stock_ticker_update",
-                        color: "#7e57c2"
-                    }
+                    priority: "high"
                 }
             });
+
             console.log("✅ Firebase ha accettato il messaggio. ID:", response);
         } else {
             console.log("❌ Token FCM non trovato nel database per l'utente:", toUserId);
