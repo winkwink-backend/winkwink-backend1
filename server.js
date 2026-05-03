@@ -1584,17 +1584,25 @@ io.on("connection", (socket) => {
 });
 
 // 🔥 Mittente chiede al destinatario di aprire la DownloadPage
+// ------------------------------------------------------------
+// OPEN DOWNLOAD PAGE (SOCKET + FCM + RETRY)
+// ------------------------------------------------------------
 socket.on('open_download_page', async (data) => {
     const { toUserId, payload } = data;
     const targetSocketId = onlineUsers.get(toUserId);
 
+    //
+    // ⭐ 1. UTENTE ONLINE → invio immediato via WebSocket
+    //
     if (targetSocketId) {
-        // ⭐ App aperta: invio via WebSocket
         io.to(targetSocketId).emit('open_download_page', payload);
+        console.log("📨 [WS] open_download_page →", toUserId);
         return;
     }
 
-    // ⭐ App chiusa: invio via Firebase (FCM)
+    //
+    // ⭐ 2. UTENTE OFFLINE → invio FCM data-only
+    //
     console.log('📱 Utente offline, invio PUSH via Firebase a:', toUserId);
 
     try {
@@ -1606,10 +1614,8 @@ socket.on('open_download_page', async (data) => {
         const token = userQuery.rows[0]?.fcm_token;
 
         if (token) {
-            const response = await admin.messaging().send({
+            await sendFCM({
                 token,
-
-                // ✅ SOLO DATA → arriva al tuo FirebaseService
                 data: {
                     type: "incoming_file",
                     sessionId: String(payload.sessionId ?? ""),
@@ -1617,100 +1623,79 @@ socket.on('open_download_page', async (data) => {
                     fileType: String(payload.fileType ?? ""),
                     fileSize: String(payload.fileSize ?? ""),
                     fromUserId: String(payload.fromUserId ?? "")
-                },
-
-                android: {
-                    priority: "high"
                 }
             });
 
-            console.log("✅ Firebase ha accettato il messaggio. ID:", response);
+            console.log("📨 [FCM] open_download_page →", toUserId);
         } else {
-            console.log("❌ Token FCM non trovato nel database per l'utente:", toUserId);
+            console.log("❌ Token FCM non trovato per:", toUserId);
         }
     } catch (error) {
-        console.error("❌ Errore durante il processo di invio Push:", error.code, error.message);
+        console.error("❌ Errore invio FCM:", error.code, error.message);
     }
 });
 
 
-  // ------------------------------------------------------------
-  // FILE TRANSFER — REJECT
-  // ------------------------------------------------------------
-  socket.on("file_reject", async ({ sessionId }) => {
+// ------------------------------------------------------------
+// FILE TRANSFER — REJECT (SOCKET + FCM)
+// ------------------------------------------------------------
+socket.on("file_reject", async ({ sessionId }) => {
     const fromUserId = socket.userId;
 
     const result = await pool.query(
-      "SELECT from_user_id FROM p2p_sessions WHERE session_id = $1",
-      [sessionId]
+        "SELECT from_user_id FROM p2p_sessions WHERE session_id = $1",
+        [sessionId]
     );
 
     if (result.rows.length === 0) {
-      console.log("❌ file_reject: sessione non trovata");
-      return;
+        console.log("❌ file_reject: sessione non trovata");
+        return;
     }
 
     const toUserId = result.rows[0].from_user_id;
     const target = onlineUsers.get(toUserId);
 
+    //
+    // ⭐ 1. UTENTE ONLINE → WebSocket
+    //
     if (target) {
-  // ⭐ Utente online → invio via WebSocket
-  io.to(target).emit("incoming_file", {
-    sessionId,
-    fromUserId: from_user_id
-  });
+        io.to(target).emit("incoming_file", {
+            sessionId,
+            fromUserId: fromUserId
+        });
 
-  console.log(`📨 [WS] incoming_file → ${to_user_id}`);
-} else {
-  // ⭐ Utente offline → invio FCM
-  console.log("📵 Utente offline → invio FCM");
-
-  const tokenResult = await pool.query(
-    "SELECT fcm_token FROM users WHERE id = $1",
-    [to_user_id]
-  );
-
-  const token = tokenResult.rows[0]?.fcm_token;
-
-  if (token) {
-    await sendFCM({
-      token,
-      data: {
-        sessionId,
-        fileName: "file.jpg",   // ← qui metti il nome reale
-        senderId: from_user_id
-      }
-    });
-
-    console.log("📨 FCM inviata a", to_user_id);
-  } else {
-    console.log("⚠️ Nessun token FCM per", to_user_id);
-  }
-}
-
-  });
-
-  // ------------------------------------------------------------
-  // DISCONNESSIONE
-  // ------------------------------------------------------------
-  socket.on("disconnect", () => {
-    const userId = socket.userId;
-
-    if (userId) {
-      onlineUsers.delete(userId);
-      io.emit("user_offline", { userId });
-
-      console.log(`🔴 Utente ${userId} offline`);
+        console.log(`📨 [WS] incoming_file → ${toUserId}`);
+        return;
     }
 
-    for (const [chatId, sockets] of chatRooms.entries()) {
-      sockets.delete(socket.id);
-      if (sockets.size === 0) {
-        chatRooms.delete(chatId);
-      }
+    //
+    // ⭐ 2. UTENTE OFFLINE → FCM data-only
+    //
+    console.log("📵 Utente offline → invio FCM");
+
+    const tokenResult = await pool.query(
+        "SELECT fcm_token FROM users WHERE id = $1",
+        [toUserId]
+    );
+
+    const token = tokenResult.rows[0]?.fcm_token;
+
+    if (token) {
+        await sendFCM({
+            token,
+            data: {
+                type: "file_reject",
+                sessionId,
+                senderId: fromUserId
+            }
+        });
+
+        console.log("📨 [FCM] file_reject →", toUserId);
+    } else {
+        console.log("⚠️ Nessun token FCM per", toUserId);
     }
-  });
 });
+
 
 
 
