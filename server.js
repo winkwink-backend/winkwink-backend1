@@ -1504,95 +1504,92 @@ io.on("connection", (socket) => {
   });
 
   // ------------------------------------------------------------
-  // FILE TRANSFER — INCOMING FILE (SOCKET)
-  // ------------------------------------------------------------
-  socket.on("file_request", async ({ sessionId }) => {
-  console.log("📥 [WS] file_request ricevuto:", sessionId);
-
-  const result = await pool.query(
-    "SELECT from_user_id, to_user_id FROM p2p_sessions WHERE session_id = $1",
-    [sessionId]
-  );
-
-  console.log("🔍 [DB] Risultato file_request:", result.rows);
-
-  if (result.rows.length === 0) {
-    console.log("❌ [WS] file_request: sessione non trovata");
-    return;
-  }
-
-  const { from_user_id, to_user_id } = result.rows[0];
-  const target = onlineUsers.get(to_user_id);
-
-  console.log("📡 [WS] Target file_request:", target);
-
-  if (target) {
-    io.to(target).emit("incoming_file", {
-      sessionId,
-      senderId: from_user_id
-    });
-
-    console.log(`📨 [WS] incoming_file → ${to_user_id}`);
-  }
-});
-
-
-  // ------------------------------------------------------------
-  // FILE TRANSFER — ACCEPT- Il backend recupera la sessione dal DB -Il backend trova il mittente
-  // Il backend inoltra l’evento file_accept Il mittente riceve l’evento Il mittente invia l’offer WebRTC
-  //Il destinatario riceve l’offer  Il trasferimento parte
-  // ------------------------------------------------------------
-  socket.on("file_accept", async ({ sessionId }) => {
-  console.log("📥 [WS] file_accept ricevuto dal client:", {
-    socketId: socket.id,
-    userId: socket.userId,
-    sessionId
-  });
-
-  const fromUserId = socket.userId;
-
-  // Recupera la sessione dal DB
-  const result = await pool.query(
-    "SELECT from_user_id FROM p2p_sessions WHERE session_id = $1",
-    [sessionId]
-  );
-
-  console.log("🔍 [DB] Risultato query sessione:", result.rows);
-
-  if (result.rows.length === 0) {
-    console.log("❌ [WS] file_accept: sessione non trovata nel DB");
-    return;
-  }
-
-  const toUserId = result.rows[0].from_user_id;
-  console.log("🎯 [WS] Mittente originale:", toUserId);
-
-  const target = onlineUsers.get(toUserId);
-  console.log("📡 [WS] Socket target:", target);
-
-  if (target) {
-    io.to(target).emit("file_accept", {
-      sessionId,
-      fromUserId,
-      toUserId
-    });
-
-    console.log(`✅ [WS] file_accept inoltrato → socket ${target}`);
-  } else {
-    console.log("⚠️ [WS] Mittente offline, impossibile inoltrare file_accept");
-  }
-});
-
-// 🔥 Mittente chiede al destinatario di aprire la DownloadPage
+// FILE TRANSFER — INCOMING FILE (SOCKET)
 // ------------------------------------------------------------
-// OPEN DOWNLOAD PAGE (SOCKET + FCM + RETRY)
+socket.on("file_request", async ({ sessionId }) => {
+    console.log("📥 [WS] file_request ricevuto:", sessionId);
+
+    const result = await pool.query(
+        "SELECT from_user_id, to_user_id FROM p2p_sessions WHERE session_id = $1",
+        [sessionId]
+    );
+
+    console.log("🔍 [DB] Risultato file_request:", result.rows);
+
+    if (result.rows.length === 0) {
+        console.log("❌ [WS] file_request: sessione non trovata");
+        return;
+    }
+
+    const { from_user_id, to_user_id } = result.rows[0];
+    const target = onlineUsers.get(to_user_id);
+
+    console.log("📡 [WS] Target file_request:", target);
+
+    if (target) {
+        io.to(target).emit("incoming_file", {
+            sessionId,
+            senderId: from_user_id
+        });
+
+        console.log(`📨 [WS] incoming_file → ${to_user_id}`);
+    }
+});
+
+
+// ------------------------------------------------------------
+// FILE TRANSFER — ACCEPT
+// ------------------------------------------------------------
+socket.on("file_accept", async ({ sessionId }) => {
+    console.log("📥 [WS] file_accept ricevuto:", {
+        socketId: socket.id,
+        userId: socket.userId,
+        sessionId
+    });
+
+    const fromUserId = socket.userId;
+
+    const result = await pool.query(
+        "SELECT from_user_id FROM p2p_sessions WHERE session_id = $1",
+        [sessionId]
+    );
+
+    console.log("🔍 [DB] Risultato query sessione:", result.rows);
+
+    if (result.rows.length === 0) {
+        console.log("❌ [WS] file_accept: sessione non trovata");
+        return;
+    }
+
+    const toUserId = result.rows[0].from_user_id;
+    console.log("🎯 [WS] Mittente originale:", toUserId);
+
+    const target = onlineUsers.get(toUserId);
+    console.log("📡 [WS] Socket target:", target);
+
+    if (target) {
+        io.to(target).emit("file_accept", {
+            sessionId,
+            fromUserId,
+            toUserId
+        });
+
+        console.log(`✅ [WS] file_accept inoltrato → socket ${target}`);
+    } else {
+        console.log("⚠️ [WS] Mittente offline, impossibile inoltrare file_accept");
+    }
+});
+
+
+// ------------------------------------------------------------
+// OPEN DOWNLOAD PAGE (SOCKET + FCM DATA-ONLY)
 // ------------------------------------------------------------
 socket.on('open_download_page', async (data) => {
     const { toUserId, payload } = data;
     const targetSocketId = onlineUsers.get(toUserId);
 
     //
-    // ⭐ 1. UTENTE ONLINE → invio immediato via WebSocket
+    // ⭐ 1. UTENTE ONLINE → WebSocket
     //
     if (targetSocketId) {
         io.to(targetSocketId).emit('open_download_page', payload);
@@ -1601,9 +1598,9 @@ socket.on('open_download_page', async (data) => {
     }
 
     //
-    // ⭐ 2. UTENTE OFFLINE → invio FCM data-only
+    // ⭐ 2. UTENTE OFFLINE → FCM DATA-ONLY
     //
-    console.log('📱 Utente offline, invio PUSH via Firebase a:', toUserId);
+    console.log('📱 Utente offline, invio FCM a:', toUserId);
 
     try {
         const userQuery = await pool.query(
@@ -1628,10 +1625,10 @@ socket.on('open_download_page', async (data) => {
 
             console.log("📨 [FCM] open_download_page →", toUserId);
         } else {
-            console.log("❌ Token FCM non trovato per:", toUserId);
+            console.log("❌ Nessun token FCM per:", toUserId);
         }
     } catch (error) {
-        console.error("❌ Errore invio FCM:", error.code, error.message);
+        console.error("❌ Errore FCM:", error);
     }
 });
 
@@ -1661,7 +1658,7 @@ socket.on("file_reject", async ({ sessionId }) => {
     if (target) {
         io.to(target).emit("incoming_file", {
             sessionId,
-            fromUserId: fromUserId
+            fromUserId
         });
 
         console.log(`📨 [WS] incoming_file → ${toUserId}`);
@@ -1669,7 +1666,7 @@ socket.on("file_reject", async ({ sessionId }) => {
     }
 
     //
-    // ⭐ 2. UTENTE OFFLINE → FCM data-only
+    // ⭐ 2. UTENTE OFFLINE → FCM DATA-ONLY
     //
     console.log("📵 Utente offline → invio FCM");
 
@@ -1695,6 +1692,7 @@ socket.on("file_reject", async ({ sessionId }) => {
         console.log("⚠️ Nessun token FCM per", toUserId);
     }
 });
+
 
 
 
