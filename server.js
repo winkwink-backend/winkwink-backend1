@@ -1487,8 +1487,6 @@ socket.on("file_request", async ({ sessionId }) => {
         [sessionId]
     );
 
-    console.log("🔍 [DB] Risultato file_request:", result.rows);
-
     if (result.rows.length === 0) {
         console.log("❌ [WS] file_request: sessione non trovata");
         return;
@@ -1496,8 +1494,6 @@ socket.on("file_request", async ({ sessionId }) => {
 
     const { from_user_id, to_user_id } = result.rows[0];
     const target = onlineUsers.get(to_user_id);
-
-    console.log("📡 [WS] Target file_request:", target);
 
     if (target) {
         io.to(target).emit("incoming_file", {
@@ -1527,18 +1523,13 @@ socket.on("file_accept", async ({ sessionId }) => {
         [sessionId]
     );
 
-    console.log("🔍 [DB] Risultato query sessione:", result.rows);
-
     if (result.rows.length === 0) {
         console.log("❌ [WS] file_accept: sessione non trovata");
         return;
     }
 
     const toUserId = result.rows[0].from_user_id;
-    console.log("🎯 [WS] Mittente originale:", toUserId);
-
     const target = onlineUsers.get(toUserId);
-    console.log("📡 [WS] Socket target:", target);
 
     if (target) {
         io.to(target).emit("file_accept", {
@@ -1555,7 +1546,7 @@ socket.on("file_accept", async ({ sessionId }) => {
 
 
 // ------------------------------------------------------------
-// OPEN DOWNLOAD PAGE (SOCKET + FCM DATA-ONLY)
+// OPEN DOWNLOAD PAGE (SOCKET + FCM)
 // ------------------------------------------------------------
 socket.on('open_download_page', async (data) => {
     const { toUserId, payload } = data;
@@ -1571,7 +1562,7 @@ socket.on('open_download_page', async (data) => {
     }
 
     //
-    // ⭐ 2. UTENTE OFFLINE → FCM DATA-ONLY
+    // ⭐ 2. UTENTE OFFLINE → FCM (NOTIFICA FUNZIONANTE)
     //
     console.log('📱 Utente offline, invio FCM a:', toUserId);
 
@@ -1584,16 +1575,17 @@ socket.on('open_download_page', async (data) => {
         const token = userQuery.rows[0]?.fcm_token;
 
         if (token) {
-            await sendFCM({
+            await admin.messaging().send({
                 token,
                 data: {
-                    type: "incoming_file",
+                    type: "open_download_page",
                     sessionId: String(payload.sessionId),
                     fileName: String(payload.fileName ?? ""),
                     fileType: String(payload.fileType ?? ""),
                     fileSize: String(payload.fileSize ?? ""),
                     senderId: String(payload.fromUserId)
-                }
+                },
+                android: { priority: "high" }
             });
 
             console.log("📨 [FCM] open_download_page →", toUserId);
@@ -1629,17 +1621,17 @@ socket.on("file_reject", async ({ sessionId }) => {
     // ⭐ 1. UTENTE ONLINE → WebSocket
     //
     if (target) {
-        io.to(target).emit("incoming_file", {
+        io.to(target).emit("file_reject", {
             sessionId,
             fromUserId
         });
 
-        console.log(`📨 [WS] incoming_file → ${toUserId}`);
+        console.log(`📨 [WS] file_reject → ${toUserId}`);
         return;
     }
 
     //
-    // ⭐ 2. UTENTE OFFLINE → FCM DATA-ONLY
+    // ⭐ 2. UTENTE OFFLINE → FCM
     //
     console.log("📵 Utente offline → invio FCM");
 
@@ -1651,13 +1643,14 @@ socket.on("file_reject", async ({ sessionId }) => {
     const token = tokenResult.rows[0]?.fcm_token;
 
     if (token) {
-        await sendFCM({
+        await admin.messaging().send({
             token,
             data: {
                 type: "file_reject",
                 sessionId,
                 senderId: fromUserId
-            }
+            },
+            android: { priority: "high" }
         });
 
         console.log("📨 [FCM] file_reject →", toUserId);
@@ -1665,6 +1658,7 @@ socket.on("file_reject", async ({ sessionId }) => {
         console.log("⚠️ Nessun token FCM per", toUserId);
     }
 });
+
 });
 
 
