@@ -1360,57 +1360,30 @@ const onlineUsers = new Map();
 // Mappa chat: chatId → Set(socketId)
 const chatRooms = new Map();
 
+// Inizializza il server una sola volta
 io.on("connection", (socket) => {
-  console.log("🔌 Nuova connessione WebSocket:", socket.id);
+    console.log("📨 [WS] Nuova connessione:", socket.id);
 
-  // ------------------------------------------------------------
-  // REGISTRAZIONE UTENTE (PRESENZA)
-  // ------------------------------------------------------------
-  io.on("connection", (socket) => {
-  console.log("🔌 [WS] Nuova connessione:", socket.id);
-
-  // ------------------------------------------------------------
-  // LOG DISCONNESSIONE
-  // ------------------------------------------------------------
-  socket.on("disconnect", (reason) => {
-    console.log("🔴 [WS] Disconnessione:", {
-      socketId: socket.id,
-      userId: socket.userId,
-      reason
+    // LOG DISCONNESSIONE
+    socket.on("disconnect", (reason) => {
+        console.log("📨 [WS] Disconnessione:", {
+            socketId: socket.id,
+            userId: socket.userId,
+            reason
+        });
+        if (socket.userId) {
+            onlineUsers.delete(socket.userId);
+            io.emit("user_offline", { userId: socket.userId });
+        }
     });
 
-    if (socket.userId) {
-      onlineUsers.delete(socket.userId);
-      console.log("📉 [WS] Utente rimosso da onlineUsers:", {
-        userId: socket.userId,
-        onlineUsers: Array.from(onlineUsers.entries())
-      });
-
-      io.emit("user_offline", { userId: socket.userId });
-    }
-  });
-
-  // ------------------------------------------------------------
-  // REGISTRAZIONE UTENTE (PRESENZA)
-  // ------------------------------------------------------------
-  socket.on("register", (userId) => {
-    console.log("📝 [WS] REGISTER ricevuto:", {
-      userId,
-      socketId: socket.id
+    // REGISTRAZIONE UTENTE
+    socket.on("register", (userId) => {
+        socket.userId = userId;
+        onlineUsers.set(userId, socket.id);
+        console.log("📨 [WS] Utente registrato:", userId);
+        io.emit("user_online", { userId });
     });
-
-    socket.userId = userId;
-    onlineUsers.set(userId, socket.id);
-
-    console.log("🟢 [WS] Utente registrato:", {
-      userId,
-      socketId: socket.id,
-      onlineUsers: Array.from(onlineUsers.entries())
-    });
-
-    io.emit("user_online", { userId });
-  });
-});
 
 
 
@@ -1691,6 +1664,7 @@ socket.on("file_reject", async ({ sessionId }) => {
     } else {
         console.log("⚠️ Nessun token FCM per", toUserId);
     }
+});
 });
 
 
