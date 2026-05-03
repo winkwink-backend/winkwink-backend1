@@ -1588,11 +1588,11 @@ socket.on('open_download_page', async (data) => {
                 token,
                 data: {
                     type: "incoming_file",
-                    sessionId: String(payload.sessionId ?? ""),
+                    sessionId: String(payload.sessionId),
                     fileName: String(payload.fileName ?? ""),
                     fileType: String(payload.fileType ?? ""),
                     fileSize: String(payload.fileSize ?? ""),
-                    fromUserId: String(payload.fromUserId ?? "")
+                    senderId: String(payload.fromUserId)
                 }
             });
 
