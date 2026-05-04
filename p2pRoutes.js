@@ -1,11 +1,9 @@
 import express from "express";
-import multer from "multer";
 import fs from "fs";
 import pool from "./db.js";
 import admin from "./firebase-config.js"; // Importiamo admin per FCM diretto come a pag. 8
 
 const router = express.Router();
-const upload = multer({ dest: "uploads/" });
 
 // ------------------------------------------------------------
 // INBOX (Pagina 6-7)
