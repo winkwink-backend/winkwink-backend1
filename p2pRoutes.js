@@ -155,35 +155,4 @@ router.get("/p2p/chat/candidates", async (req, res) => {
   }
 });
 
-// ------------------------------------------------------------
-// FILES FALLBACK (Pagine 12)
-// ------------------------------------------------------------
-router.post("/files/upload", upload.single("file"), async (req, res) => {
-  try {
-    const { user_id } = req.body;
-    const result = await pool.query(
-      `INSERT INTO fallback_files (owner_user_id, file_path, size, expires_at)
-       VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour') RETURNING id`,
-      [user_id, req.file.path, req.file.size]
-    );
-    return res.json({ fileId: result.rows[0].id });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-router.get("/files/download/:id", async (req, res) => {
-  try {
-    const result = await pool.query("SELECT file_path FROM fallback_files WHERE id = $1", [req.params.id]);
-    if (result.rows.length === 0) return res.status(404).json({ error: "File not found" });
-    const filePath = result.rows[0].file_path;
-    res.download(filePath, () => {
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      pool.query("DELETE FROM fallback_files WHERE id = $1", [req.params.id]);
-    });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
 export default router;
