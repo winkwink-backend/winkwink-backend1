@@ -21,11 +21,9 @@ if (serviceAccount && admin.apps.length === 0) {
   });
 }
 
-export async function sendFCM({ token, title, body, data }) {
-  console.log("📡 [DEBUG FCM] Inizio funzione sendFCM"); // Questo DEVE apparire
+export async function sendFCM({ token, data }) {
+  console.log("📡 [DEBUG FCM] Inizio funzione sendFCM");
   console.log("- Token:", token ? token.substring(0, 15) : "MANCANTE");
-
-  if (!token) return console.log("⚠️ [DEBUG FCM] Token nullo, annullo.");
 
   if (!token) {
     console.log("⚠️ [DEBUG FCM] Abortito: Token mancante");
@@ -34,24 +32,16 @@ export async function sendFCM({ token, title, body, data }) {
 
   const message = {
     token: token,
-    notification: {
-      title: title || "WinkWink",
-      body: body || "Hai ricevuto un nuovo file!"
-    },
-    data: data || {},
+    data: data, // ⭐ SOLO DATA, NIENTE notification
     android: {
       priority: "high",
-      notification: {
-        channelId: "high_importance_channel", // Assicurati che esista nel codice Android
-        clickAction: "FLUTTER_NOTIFICATION_CLICK", // Utile se usi Flutter
-      }
     },
     apns: {
-        payload: {
-            aps: {
-                contentAvailable: true,
-            },
+      payload: {
+        aps: {
+          contentAvailable: true,
         },
+      },
     },
   };
 
@@ -63,5 +53,6 @@ export async function sendFCM({ token, title, body, data }) {
     console.error("❌ [DEBUG FCM] Errore durante l'invio:", err.message);
   }
 }
+
 
 export default admin;
