@@ -1,7 +1,8 @@
 import express from "express";
 import bcrypt from "bcrypt";
 import pool from "./db.js";
-import { otpStore, generateOtp, transporter } from "./utils.js";
+import { otpStore, generateOtp } from "./utils.js";
+
 
 const router = express.Router();
 
