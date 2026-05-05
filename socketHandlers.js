@@ -157,24 +157,35 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
   });
 
   socket.on("file_accept", async ({ sessionId }) => {
-    const result = await pool.query(
-      "SELECT from_user_id FROM p2p_sessions WHERE session_id = $1",
-      [sessionId]
-    );
+  console.log("📥 [FILE_ACCEPT] Ricevuto da client:", { sessionId, fromUserId: socket.userId });
 
-    if (result.rows.length > 0) {
-      const toUserId = result.rows[0].from_user_id;
-      const target = onlineUsers.get(toUserId);
+  const result = await pool.query(
+    "SELECT from_user_id FROM p2p_sessions WHERE session_id = $1",
+    [sessionId]
+  );
 
-      if (target) {
-        io.to(target).emit("file_accept", {
-          sessionId,
-          fromUserId: socket.userId,
-          toUserId,
-        });
-      }
-    }
-  });
+  if (result.rows.length === 0) {
+    console.log("⚠️ [FILE_ACCEPT] Nessuna sessione trovata per", sessionId);
+    return;
+  }
+
+  const toUserId = result.rows[0].from_user_id;
+  const target = onlineUsers.get(toUserId);
+
+  console.log("🎯 [FILE_ACCEPT] Mittente previsto:", toUserId, "socket:", target);
+
+  if (target) {
+    console.log("📤 [WS] file_accept → mittente", toUserId);
+    io.to(target).emit("file_accept", {
+      sessionId,
+      fromUserId: socket.userId,
+      toUserId,
+    });
+  } else {
+    console.log("📵 [FILE_ACCEPT] Mittente offline, nessun WS");
+  }
+});
+
 
   socket.on("file_reject", async ({ sessionId }) => {
     const result = await pool.query(
