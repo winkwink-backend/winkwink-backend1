@@ -60,22 +60,31 @@ router.post("/p2p/session/create", async (req, res) => {
     const token = receiver.rows[0]?.fcm_token;
 
     if (token) {
-      await admin.messaging().send({
-        token: token,
-        data: {
-          type: "incoming_file",
-          sessionId: String(sessionId),
-          fileName: "", 
-          fileType: String(fileType ?? ""),
-          fileSize: String(fileSize ?? ""),
-          fromUserId: String(from_user_id)
-          senderName: String(sender_name)
 
-        },
-        android: { priority: "high" }
-      });
-      console.log(`📨 incoming_file via FCM → utente ${to_user_id}`);
-    }
+  // Recupero nome mittente
+  const sender = await pool.query(
+    "SELECT name FROM users WHERE id = $1",
+    [from_user_id]
+  );
+  const senderName = sender.rows[0]?.name ?? "";
+
+  await admin.messaging().send({
+    token: token,
+    data: {
+      type: "incoming_file",
+      sessionId: String(sessionId),
+      fileName: "",
+      fileType: String(fileType ?? ""),
+      fileSize: String(fileSize ?? ""),
+      fromUserId: String(from_user_id),
+      senderName: senderName
+    },
+    android: { priority: "high" }
+  });
+
+  console.log(`📨 incoming_file via FCM → utente ${to_user_id}`);
+}
+
 
     return res.json({
       delivered: token ? "fcm" : "none",
