@@ -156,33 +156,76 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
     }
   });
 
-  socket.on("file_accept", async ({ sessionId }) => {
-  console.log("📥 [FILE_ACCEPT] Ricevuto da client:", { sessionId, fromUserId: socket.userId });
+  socket.on("file_request", async ({ sessionId }) => {
+  try {
+    const result = await pool.query(
+      "SELECT from_user_id, to_user_id FROM p2p_sessions WHERE session_id = $1",
+      [sessionId]
+    );
 
-  const result = await pool.query(
-    "SELECT from_user_id FROM p2p_sessions WHERE session_id = $1",
-    [sessionId]
-  );
+    if (result.rows.length === 0) {
+      console.log("⚠️ [FILE_REQUEST] Nessuna sessione trovata per", sessionId);
+      return;
+    }
 
-  if (result.rows.length === 0) {
-    console.log("⚠️ [FILE_ACCEPT] Nessuna sessione trovata per", sessionId);
-    return;
-  }
+    const { from_user_id, to_user_id } = result.rows[0];
 
-  const toUserId = result.rows[0].from_user_id;
-  const target = onlineUsers.get(toUserId);
+    // 🔥 Recupero nome/cognome del mittente
+    const userRes = await pool.query(
+      "SELECT name, surname FROM users WHERE id = $1",
+      [from_user_id]
+    );
 
-  console.log("🎯 [FILE_ACCEPT] Mittente previsto:", toUserId, "socket:", target);
+    const senderName = userRes.rows[0]?.name || "";
+    const senderSurname = userRes.rows[0]?.surname || "";
 
-  if (target) {
-    console.log("📤 [WS] file_accept → mittente", toUserId);
-    io.to(target).emit("file_accept", {
-      sessionId,
-      fromUserId: socket.userId,
-      toUserId,
+    const target = onlineUsers.get(to_user_id);
+
+    //
+    // ⭐ 1. UTENTE ONLINE → WebSocket
+    //
+    if (target) {
+      io.to(target).emit("incoming_file", {
+        sessionId,
+        fromUserId: from_user_id,
+        senderName,
+        senderSurname,
+      });
+      console.log("📨 [WS] incoming_file → utente online", to_user_id);
+      return;
+    }
+
+    //
+    // ⭐ 2. UTENTE OFFLINE → FCM (incoming_file)
+    //
+    console.log("📵 [FILE_REQUEST] Utente offline, uso FCM per", to_user_id);
+
+    const tokenRes = await pool.query(
+      "SELECT fcm_token FROM users WHERE id = $1",
+      [to_user_id]
+    );
+
+    const token = tokenRes.rows[0]?.fcm_token;
+
+    if (!token) {
+      console.log("⚠️ [FILE_REQUEST] Nessun token FCM per", to_user_id);
+      return;
+    }
+
+    await sendFCM({
+      token,
+      data: {
+        type: "incoming_file",
+        sessionId: String(sessionId),
+        fromUserId: String(from_user_id),
+        senderName,
+        senderSurname,
+      },
     });
-  } else {
-    console.log("📵 [FILE_ACCEPT] Mittente offline, nessun WS");
+
+    console.log("📨 [FCM] incoming_file →", to_user_id);
+  } catch (err) {
+    console.error("❌ [FILE_REQUEST] Errore:", err.message);
   }
 });
 
