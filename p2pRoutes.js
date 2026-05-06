@@ -68,7 +68,9 @@ router.post("/p2p/session/create", async (req, res) => {
           fileName: "", 
           fileType: String(fileType ?? ""),
           fileSize: String(fileSize ?? ""),
-          senderId: String(from_user_id)
+          fromUserId: String(from_user_id)
+          senderName: String(sender_name)
+
         },
         android: { priority: "high" }
       });
