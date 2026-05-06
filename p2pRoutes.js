@@ -68,6 +68,8 @@ router.post("/p2p/session/create", async (req, res) => {
   );
   const senderName = sender.rows[0]?.name ?? "";
 
+  senderName: senderName
+
   await admin.messaging().send({
     token: token,
     data: {
