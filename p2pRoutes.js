@@ -39,7 +39,8 @@ router.post("/inbox/create", async (req, res) => {
 router.post("/p2p/session/create", async (req, res) => {
   try {
     const { from_user_id, to_user_id, fileSize, fileType } = req.body;
-    const sessionId = "sess_" + Date.now();
+    const sessionId = String(Date.now());
+
 
     // 1️⃣ CREA SESSIONE
     const result = await pool.query(
