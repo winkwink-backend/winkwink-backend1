@@ -15,14 +15,19 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
   // PRESENZA E REGISTRAZIONE
   // ------------------------------------------------------------
   socket.on("register", (userId) => {
+    console.log("🔥 [DEBUG] REGISTER CHIAMATO", { userId, socketId: socket.id });
     socket.userId = userId;
     onlineUsers.set(userId, socket.id);
     console.log("📨 [WS] Utente registrato:", userId);
+    console.log("🔥 [DEBUG] onlineUsers:", Array.from(onlineUsers.entries()));
     io.emit("user_online", { userId });
   });
 
   socket.on("disconnect", (reason) => {
     console.log("📨 [WS] Disconnessione:", { socketId: socket.id, userId: socket.userId, reason });
+    console.log("🔥 [DEBUG] DISCONNECT", { userId: socket.userId, socketId: socket.id });
+    console.log("🔥 [DEBUG] onlineUsers DOPO DELETE:", Array.from(onlineUsers.entries()));
+
     if (socket.userId) {
       onlineUsers.delete(socket.userId);
       io.emit("user_offline", { userId: socket.userId });
