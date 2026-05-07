@@ -25,14 +25,16 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
 
   socket.on("disconnect", (reason) => {
     console.log("📨 [WS] Disconnessione:", { socketId: socket.id, userId: socket.userId, reason });
-    console.log("🔥 [DEBUG] DISCONNECT", { userId: socket.userId, socketId: socket.id });
-    console.log("🔥 [DEBUG] onlineUsers DOPO DELETE:", Array.from(onlineUsers.entries()));
 
     if (socket.userId) {
-      onlineUsers.delete(socket.userId);
-      io.emit("user_offline", { userId: socket.userId });
+        onlineUsers.delete(socket.userId);
+        console.log("🔥 [DEBUG] DELETE ESEGUITO → onlineUsers:", Array.from(onlineUsers.entries()));
+        io.emit("user_offline", { userId: socket.userId });
+    } else {
+        console.log("🔥 [DEBUG] DISCONNECT SENZA USERID");
     }
   });
+
 
   // ------------------------------------------------------------
   // GESTIONE CHAT

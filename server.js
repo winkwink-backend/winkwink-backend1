@@ -45,38 +45,57 @@ io.on("connection", (socket) => {
 app.post("/file_accept_http", async (req, res) => {
     const { sessionId, userId } = req.body;
 
-    console.log("📥 [HTTP FILE_ACCEPT] da", userId);
+    console.log("🔥 [DEBUG] /file_accept_http ARRIVATO", { sessionId, userId });
 
+    // 1️⃣ Verifica sessione
     const result = await pool.query(
         "SELECT from_user_id FROM p2p_sessions WHERE session_id = $1",
         [sessionId]
     );
 
+    console.log("🔥 [DEBUG] RISULTATO QUERY SESSIONE:", result.rows);
+
     if (result.rows.length === 0) {
+        console.log("❌ [DEBUG] NESSUNA SESSIONE TROVATA");
         return res.json({ ok: false });
     }
 
     const toUserId = result.rows[0].from_user_id;
+
+    console.log("🔥 [DEBUG] MITTENTE (toUserId):", toUserId);
+
+    // 2️⃣ Verifica se il mittente è online
     const target = onlineUsers.get(toUserId);
 
+    console.log("🔥 [DEBUG] SOCKET MITTENTE TROVATO?", {
+        toUserId,
+        target,
+        onlineUsers: Array.from(onlineUsers.entries())
+    });
+
     if (target) {
-        // 1️⃣ Notifica al mittente che il ricevente ha accettato
+        console.log("🔥 [DEBUG] INVIO file_accept → socket:", target);
+
         io.to(target).emit("file_accept", {
             sessionId,
             fromUserId: userId,
         });
 
-        // 2️⃣ ⭐ AVVIA IL DOWNLOAD (questo mancava!)
+        console.log("🔥 [DEBUG] INVIO open_download_page → socket:", target);
+
         io.to(target).emit("open_download_page", {
             sessionId,
             fromUserId: userId,
         });
 
         console.log("📤 [WS] open_download_page → mittente", toUserId);
+    } else {
+        console.log("❌ [DEBUG] MITTENTE OFFLINE → NESSUN WS INVIATO");
     }
 
     res.json({ ok: true });
 });
+
 
 
 const PORT = process.env.PORT || 10000;
