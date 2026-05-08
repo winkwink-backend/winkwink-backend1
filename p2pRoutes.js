@@ -1,7 +1,7 @@
 import express from "express";
 import fs from "fs";
 import pool from "./db.js";
-import admin from "./firebase-config.js"; // Importiamo admin per FCM diretto come a pag. 8
+import admin from "./firebase-config.js";
 
 const router = express.Router();
 
@@ -38,61 +38,69 @@ router.post("/inbox/create", async (req, res) => {
 // ------------------------------------------------------------
 router.post("/p2p/session/create", async (req, res) => {
   try {
-    const { from_user_id, to_user_id, fileSize, fileType } = req.body;
+    const { from_user_id, to_user_id, fileSize, fileType, fileName } = req.body;
     const sessionId = String(Date.now());
 
-
-    // 1️⃣ CREA SESSIONE
+    // 1️⃣ CREA SESSIONE (salvo anche metadati file)
     const result = await pool.query(
-      `INSERT INTO p2p_sessions (session_id, from_user_id, to_user_id)
-       VALUES ($1, $2, $3) RETURNING *`,
-      [sessionId, from_user_id, to_user_id]
+      `INSERT INTO p2p_sessions (session_id, from_user_id, to_user_id, file_size, file_type, file_name)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [sessionId, from_user_id, to_user_id, fileSize, fileType, fileName ?? ""]
     );
 
-    // 2️⃣ SALVA IN INBOX
+    // 2️⃣ SALVA IN INBOX (includo anche fileName)
     await pool.query(
       `INSERT INTO inbox (to_user_id, from_user_id, type, payload)
        VALUES ($1, $2, 'file_transfer_request', $3)`,
-      [to_user_id, from_user_id, { sessionId, fileSize, fileType }]
+      [
+        to_user_id,
+        from_user_id,
+        {
+          sessionId,
+          fileSize,
+          fileType,
+          fileName: fileName ?? "",
+        },
+      ]
     );
 
-    // 3️⃣ RECUPERO TOKEN DESTINATARIO PER FALLBACK FCM (Pagina 8)
-    const receiver = await pool.query("SELECT fcm_token FROM users WHERE id = $1", [to_user_id]);
+    // 3️⃣ RECUPERO TOKEN DESTINATARIO PER FALLBACK FCM
+    const receiver = await pool.query(
+      "SELECT fcm_token FROM users WHERE id = $1",
+      [to_user_id]
+    );
     const token = receiver.rows[0]?.fcm_token;
 
     if (token) {
+      // Recupero nome mittente
+      const sender = await pool.query(
+        "SELECT name FROM users WHERE id = $1",
+        [from_user_id]
+      );
+      const senderName = sender.rows[0]?.name ?? "";
 
-  // Recupero nome mittente
-  const sender = await pool.query(
-    "SELECT name FROM users WHERE id = $1",
-    [from_user_id]
-  );
-  const senderName = sender.rows[0]?.name ?? "";
+      await admin.messaging().send({
+        token: token,
+        data: {
+          type: "incoming_file",
+          sessionId: String(sessionId),
+          fileName: String(fileName ?? ""),
+          fileType: String(fileType ?? ""),
+          fileSize: String(fileSize ?? ""),
+          fromUserId: String(from_user_id),
+          senderName: senderName,
+        },
+        android: { priority: "high" },
+      });
 
-  senderName: senderName
-
-  await admin.messaging().send({
-    token: token,
-    data: {
-      type: "incoming_file",
-      sessionId: String(sessionId),
-      fileName: "",
-      fileType: String(fileType ?? ""),
-      fileSize: String(fileSize ?? ""),
-      fromUserId: String(from_user_id),
-      senderName: senderName
-    },
-    android: { priority: "high" }
-  });
-
-  console.log(`📨 incoming_file via FCM → utente ${to_user_id}`);
-}
-
+      console.log(`📨 incoming_file via FCM → utente ${to_user_id}`);
+    }
 
     return res.json({
       delivered: token ? "fcm" : "none",
       session: result.rows[0],
-      i18n_key: "file_transfer_waiting_accept"
+      i18n_key: "file_transfer_waiting_accept",
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });
@@ -103,8 +111,12 @@ router.post("/p2p/session/create", async (req, res) => {
 router.get("/p2p/session/:sessionId", async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const result = await pool.query("SELECT * FROM p2p_sessions WHERE session_id = $1", [sessionId]);
-    if (result.rows.length === 0) return res.status(404).json({ error: "Session not found" });
+    const result = await pool.query(
+      "SELECT * FROM p2p_sessions WHERE session_id = $1",
+      [sessionId]
+    );
+    if (result.rows.length === 0)
+      return res.status(404).json({ error: "Session not found" });
     return res.json({ session: result.rows[0] });
   } catch (err) {
     return res.status(500).json({ error: err.message });

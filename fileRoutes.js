@@ -1,37 +1,94 @@
 import express from "express";
 import pool from "./db.js";
+import { sendFCM } from "./firebase-config.js";
 
 const router = express.Router();
 
 // ---------------------------------------------------------
-// ⭐ NUOVA ROTTA: Accettazione File via HTTP (Fix Android)
+// ⭐ ACCETTAZIONE FILE VIA HTTP (PATCH COMPLETA)
 // ---------------------------------------------------------
 router.post("/file_accept_http", async (req, res) => {
   const { sessionId, userId } = req.body;
 
-  console.log(`📩 [HTTP POST] Ricevuta accettazione: Sessione ${sessionId} da Utente ${userId}`);
+  console.log(`📩 [HTTP POST] Accettazione ricevuta → sessionId=${sessionId}, userId=${userId}`);
 
   if (!sessionId || !userId) {
-    console.error("❌ [HTTP ERROR] Parametri mancanti nella richiesta");
-    return res.status(400).json({ 
-      error: "Parametri sessionId o userId mancanti" 
-    });
+    console.error("❌ Parametri mancanti");
+    return res.status(400).json({ error: "Parametri sessionId o userId mancanti" });
   }
 
   try {
-    // Qui aggiorni lo stato della sessione nel database se necessario
-    // Esempio: await pool.query("UPDATE p2p_sessions SET status = 'accepted' WHERE session_id = $1", [sessionId]);
+    // 1️⃣ Recupero sessione
+    const result = await pool.query(
+      "SELECT * FROM p2p_sessions WHERE session_id = $1",
+      [sessionId]
+    );
 
-    console.log(`✅ [HTTP SUCCESS] Sessione ${sessionId} registrata correttamente`);
-    
-    res.status(200).json({ 
-      success: true,
-      message: "Accettazione ricevuta dal server",
+    if (result.rows.length === 0) {
+      console.log("❌ Nessuna sessione trovata nel DB");
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    const session = result.rows[0];
+    const senderId = session.from_user_id;
+    const receiverId = session.to_user_id;
+
+    console.log("📦 Sessione trovata:", session);
+
+    // 2️⃣ Recupero socket del mittente
+    const senderSocketId = req.app.get("onlineUsers").get(String(senderId));
+
+    // 3️⃣ Payload da inviare al mittente
+    const payload = {
       sessionId,
-      userId 
+      fileName: session.file_name,
+      fileType: session.file_type,
+      fileSize: session.file_size,
+      receiverId
+    };
+
+    // 4️⃣ Mittente ONLINE → WebSocket
+    if (senderSocketId) {
+      console.log("📡 Mittente online → invio start_sending_file via WS");
+      req.app.get("io").to(senderSocketId).emit("start_sending_file", payload);
+    } else {
+      // 5️⃣ Mittente OFFLINE → FCM
+      console.log("📵 Mittente offline → invio FCM start_sending_file");
+
+      const tokenRes = await pool.query(
+        "SELECT fcm_token FROM users WHERE id = $1",
+        [senderId]
+      );
+
+      const token = tokenRes.rows[0]?.fcm_token;
+
+      if (token) {
+        await sendFCM({
+          token,
+          data: {
+            type: "start_sending_file",
+            ...Object.fromEntries(
+              Object.entries(payload).map(([k, v]) => [k, String(v)])
+            )
+          }
+        });
+      } else {
+        console.log("⚠️ Nessun token FCM per il mittente");
+      }
+    }
+
+    // 6️⃣ Risposta HTTP
+    console.log("✅ Accettazione gestita correttamente");
+    res.status(200).json({
+      success: true,
+      message: "Accettazione elaborata",
+      sessionId,
+      senderId,
+      receiverId
     });
+
   } catch (err) {
-    console.error("❌ [SERVER ERROR] Errore nel salvataggio accettazione:", err.message);
+    console.error("❌ Errore nel file_accept_http:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
