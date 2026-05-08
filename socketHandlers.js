@@ -107,16 +107,18 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
   // crea sessione
   // ------------------------------------------------------------
 
-  socket.on("create_session", async ({ 
+  socket.on("create_session", async (data) => {
+  const {
     sessionId,
     fromUserId,
-   toUserId,
-   fileName,
+    toUserId,
+    fileName,
     fileType,
-   fileSize,
-  }) => {
-    try {
-     console.log("📦 [WS] create_session ricevuto:", {
+    fileSize,
+  } = data;
+
+  try {
+    console.log("📦 [WS] create_session ricevuto:", {
       sessionId,
       fromUserId,
       toUserId,
@@ -125,6 +127,7 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
       fileSize,
     });
 
+    // 1️⃣ SALVA SUBITO LA SESSIONE (operazione atomica)
     await pool.query(
       `INSERT INTO p2p_sessions
         (session_id, from_user_id, to_user_id, file_name, file_type, file_size)
@@ -133,11 +136,12 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
       [sessionId, fromUserId, toUserId, fileName, fileType, fileSize]
     );
 
-    console.log("✅ [WS] Sessione salvata in p2p_sessions:", sessionId);
+    console.log(`✅ [WS] Sessione salvata in p2p_sessions: ${sessionId}`);
   } catch (err) {
     console.error("❌ [WS] Errore in create_session:", err.message);
   }
 });
+
 
 
   // ------------------------------------------------------------
