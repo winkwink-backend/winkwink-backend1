@@ -101,6 +101,45 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
     if (target) io.to(target).emit("ice_candidate", { from: socket.userId, candidate });
   });
 
+
+
+  // ------------------------------------------------------------
+  // crea sessione
+  // ------------------------------------------------------------
+
+  socket.on("create_session", async ({ 
+    sessionId,
+    fromUserId,
+   toUserId,
+   fileName,
+    fileType,
+   fileSize,
+  }) => {
+    try {
+     console.log("📦 [WS] create_session ricevuto:", {
+      sessionId,
+      fromUserId,
+      toUserId,
+      fileName,
+      fileType,
+      fileSize,
+    });
+
+    await pool.query(
+      `INSERT INTO p2p_sessions
+        (session_id, from_user_id, to_user_id, file_name, file_type, file_size)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (session_id) DO NOTHING`,
+      [sessionId, fromUserId, toUserId, fileName, fileType, fileSize]
+    );
+
+    console.log("✅ [WS] Sessione salvata in p2p_sessions:", sessionId);
+  } catch (err) {
+    console.error("❌ [WS] Errore in create_session:", err.message);
+  }
+});
+
+
   // ------------------------------------------------------------
   // FILE TRANSFER (REQUEST / ACCEPT / REJECT)
   // ------------------------------------------------------------
