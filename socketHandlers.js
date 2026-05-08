@@ -164,12 +164,12 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
 
     // 🔥 Recupero nome/cognome del mittente
     const userRes = await pool.query(
-      "SELECT name, surname FROM users WHERE id = $1",
+      "SELECT name, last_name  FROM users WHERE id = $1",
       [from_user_id]
     );
 
     const senderName = userRes.rows[0]?.name || "";
-    const senderSurname = userRes.rows[0]?.surname || "";
+    const senderSurname = userRes.rows[0]?.last_name  || "";
 
     const target = onlineUsers.get(to_user_id);
 
