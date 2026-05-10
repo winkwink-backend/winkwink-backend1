@@ -183,19 +183,25 @@ router.post("/contacts/sync", async (req, res) => {
 
     const wwResult = await pool.query(
     `SELECT 
-        id AS "userId", 
-        name, 
-        last_name AS "lastName", 
-        REPLACE(REPLACE(phone, '+', ''), ' ', '') AS phone, -- Restituisce il numero senza + per il match Flutter
-        public_key AS "publicKey",
-        qr_data AS "qrData", 
-        COALESCE(peer_id, id::text) AS "peerId", -- Forza il peerId se mancante
-        COALESCE(fingerprint, '') AS fingerprint, 
-        version
-    FROM users 
-    WHERE ... (la query con RIGHT(..., 10) che abbiamo fatto prima)`,
-    [phones]
+       id::text AS "userId", -- Forza a stringa per Flutter
+       name, 
+       last_name AS "lastName", 
+       REPLACE(REPLACE(phone, '+', ''), ' ', '') AS phone,
+       COALESCE(public_key, '') AS "publicKey",
+       qr_data AS "qrData", 
+       id::text AS "peerId", -- Usa l'ID come peerId sicuro
+       COALESCE(fingerprint, '') AS fingerprint, 
+       COALESCE(version, 1) AS version
+       FROM users 
+     WHERE 
+        REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
+        OR 
+        RIGHT(REPLACE(REPLACE(phone, '+', ''), ' ', ''), 10) = ANY(
+         SELECT RIGHT(REPLACE(REPLACE(u, '+', ''), ' ', ''), 10) FROM unnest($1::text[]) u
+        )`,
+     [phones]
    );
+
 
 
 
