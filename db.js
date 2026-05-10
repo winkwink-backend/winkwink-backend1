@@ -4,11 +4,8 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const pool = new Pool({
-  host: process.env.PGHOST,
-  port: process.env.PGPORT,
-  database: process.env.PGDATABASE,
-  user: process.env.PGUSER,
-  password: process.env.PGPASSWORD,
+  // Se Railway fornisce DATABASE_URL lo usa, altrimenti usa i parametri singoli
+  connectionString: process.env.DATABASE_URL || `postgres://${process.env.PGUSER}:${process.env.PGPASSWORD}@${process.env.PGHOST}:${process.env.PGPORT}/${process.env.PGDATABASE}`,
   ssl: { rejectUnauthorized: false }
 });
 
@@ -16,7 +13,7 @@ pool.query('SELECT NOW()', (err) => {
   if (err) {
     console.error("❌ Errore critico DB:", err);
   } else {
-    console.log("✅ Database connesso correttamente");
+    console.log("✅ Database connesso correttamente su Railway");
   }
 });
 
