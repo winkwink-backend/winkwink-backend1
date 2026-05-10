@@ -181,26 +181,50 @@ router.post("/contacts/sync", async (req, res) => {
     
     phones = phones.map(p => p.replace(/\s+/g, "").replace(/^\+/, ""));
 
+    router.post("/contacts/sync", async (req, res) => {
+  try {
+    let { phones, userId } = req.body;
+    
+    // 🚩 GUARDA I LOG DI RAILWAY QUANDO PREMI IL TASTO NELL'APP
+    console.log("📱 SYNC RICHIESTA DA USER:", userId);
+    console.log("📞 NUMERI RICEVUTI:", phones ? phones.length : 0);
+
+    if (!phones || phones.length === 0) return res.json({ all_contacts: [], ww_contacts: [], chats: [] });
+
+    // Normalizzazione numeri per il confronto
+    const cleanedPhones = phones.map(p => p.replace(/\s+/g, "").replace(/^\+/, ""));
+
     const wwResult = await pool.query(
-    `SELECT 
-       id::text AS "userId", -- Forza a stringa per Flutter
-       name, 
-       last_name AS "lastName", 
-       REPLACE(REPLACE(phone, '+', ''), ' ', '') AS phone,
-       COALESCE(public_key, '') AS "publicKey",
-       qr_data AS "qrData", 
-       id::text AS "peerId", -- Usa l'ID come peerId sicuro
-       COALESCE(fingerprint, '') AS fingerprint, 
-       COALESCE(version, 1) AS version
+      `SELECT 
+        id::text AS "userId", 
+        name, 
+        last_name AS "lastName", 
+        phone, 
+        public_key AS "publicKey",
+        id::text AS "peerId", 
+        COALESCE(fingerprint, '') AS fingerprint, 
+        version
        FROM users 
-     WHERE 
-        REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
-        OR 
-        RIGHT(REPLACE(REPLACE(phone, '+', ''), ' ', ''), 10) = ANY(
-         SELECT RIGHT(REPLACE(REPLACE(u, '+', ''), ' ', ''), 10) FROM unnest($1::text[]) u
-        )`,
-     [phones]
-   );
+       WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
+          OR RIGHT(REPLACE(REPLACE(phone, '+', ''), ' ', ''), 10) = ANY(
+             SELECT RIGHT(REPLACE(REPLACE(u, '+', ''), ' ', ''), 10) FROM unnest($1::text[]) u
+          )`,
+      [cleanedPhones]
+    );
+
+    console.log("✅ CONTATTI WINKWINK TROVATI:", wwResult.rows.length);
+
+    res.json({
+      all_contacts: phones.map(p => ({ phone: p, name: "" })),
+      ww_contacts: wwResult.rows,
+      chats: [] // o la tua query delle chat
+    });
+  } catch (err) {
+    console.error("❌ ERRORE SYNC:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 
 
