@@ -182,11 +182,26 @@ router.post("/contacts/sync", async (req, res) => {
     phones = phones.map(p => p.replace(/\s+/g, "").replace(/^\+/, ""));
 
     const wwResult = await pool.query(
-      `SELECT id AS "userId", name, last_name AS "lastName", phone, public_key AS "publicKey",
-       qr_data AS "qrData", peer_id AS "peerId", fingerprint, version
-       FROM users WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)`,
+     `SELECT 
+       id AS "userId", 
+        name, 
+         last_name AS "lastName", 
+         phone, 
+         public_key AS "publicKey",
+         qr_data AS "qrData", 
+         peer_id AS "peerId", 
+         COALESCE(fingerprint, '') AS fingerprint, 
+         COALESCE(version, '1.0.0') AS version
+      FROM users 
+      WHERE 
+        REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1) -- Match esatto (es. 39333...)
+        OR 
+        RIGHT(REPLACE(REPLACE(phone, '+', ''), ' ', ''), 10) = ANY(
+        SELECT RIGHT(REPLACE(REPLACE(u, '+', ''), ' ', ''), 10) FROM unnest($1::text[]) u
+        ) -- Match sulle ultime 10 cifre (ignora il prefisso internazionale)`,
       [phones]
     );
+
 
     const chatResult = await pool.query(
       `SELECT c.id AS chat_id, CASE WHEN c.user1 = $1 THEN c.user2 ELSE c.user1 END AS other_id,
