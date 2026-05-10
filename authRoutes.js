@@ -1,5 +1,5 @@
 import express from "express";
-import bcrypt from "bcrypt";
+import bcryptjs from "bcryptjs";
 import pool from "./db.js";
 import { otpStore, generateOtp } from "./utils.js";
 
@@ -19,7 +19,7 @@ router.post("/register", async (req, res) => {
     if (existing.rows.length > 0)
       return res.status(409).json({ error: "User already exists" });
 
-    const password_hash = await bcrypt.hash(password, 10);
+    const password_hash = await bcryptjs.hash(password, 10);
     const result = await pool.query(
       "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email, created_at",
       [email, password_hash]
@@ -104,7 +104,7 @@ router.post("/password-reset/verify", (req, res) => {
 router.post("/password-reset/new", async (req, res) => {
   try {
     const { email, password } = req.body;
-    const hash = await bcrypt.hash(password, 10);
+    const hash = await bcryptjs.hash(password, 10);
     await pool.query("UPDATE users SET password_hash = $1 WHERE email = $2", [hash, email]);
     otpStore.delete(email);
     return res.json({ message: "Password aggiornata" });
