@@ -195,22 +195,23 @@ router.post("/contacts/sync", async (req, res) => {
     const cleanedPhones = phones.map(p => p.replace(/\s+/g, "").replace(/^\+/, ""));
 
     const wwResult = await pool.query(
-      `SELECT 
-        id::text AS "userId", 
-        name, 
-        last_name AS "lastName", 
-        phone, 
-        public_key AS "publicKey",
-        id::text AS "peerId", 
-        COALESCE(fingerprint, '') AS fingerprint, 
-        version
-       FROM users 
-       WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
-          OR RIGHT(REPLACE(REPLACE(phone, '+', ''), ' ', ''), 10) = ANY(
-             SELECT RIGHT(REPLACE(REPLACE(u, '+', ''), ' ', ''), 10) FROM unnest($1::text[]) u
-          )`,
-      [cleanedPhones]
+     `SELECT 
+       id::text AS "userId", 
+       name, 
+       last_name AS "lastName", 
+       phone, 
+       public_key AS "publicKey",
+       id::text AS "peerId", 
+       COALESCE(fingerprint, '') AS fingerprint, 
+       version
+     FROM users 
+     WHERE 
+        REPLACE(phone, '+', '') = ANY(SELECT REPLACE(u, '+', '') FROM unnest($1::text[]) u)
+       OR 
+       RIGHT(phone, 10) = ANY(SELECT RIGHT(REPLACE(u, '+', ''), 10) FROM unnest($1::text[]) u)`,
+     [phones]
     );
+
 
     console.log("✅ CONTATTI WINKWINK TROVATI:", wwResult.rows.length);
 
