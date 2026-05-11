@@ -203,14 +203,19 @@ router.post("/contacts/sync", async (req, res) => {
        public_key AS "publicKey",
        id::text AS "peerId", 
        COALESCE(fingerprint, '') AS fingerprint, 
-       version
+       COALESCE(version, '1') AS version
      FROM users 
      WHERE 
-        REPLACE(phone, '+', '') = ANY(SELECT REPLACE(u, '+', '') FROM unnest($1::text[]) u)
-       OR 
-       RIGHT(phone, 10) = ANY(SELECT RIGHT(REPLACE(u, '+', ''), 10) FROM unnest($1::text[]) u)`,
-     [phones]
+         -- Cerca il numero togliendo tutto (pulisce il DB e l'input)
+         REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
+         OR 
+         -- TRUCCO: Confronta solo le ultime 9 cifre (funziona con o senza 39)
+         RIGHT(REPLACE(REPLACE(phone, '+', ''), ' ', ''), 9) = ANY(
+            SELECT RIGHT(u, 9) FROM unnest($1::text[]) u
+         )`, 
+      [phones]
     );
+
 
 
     console.log("✅ CONTATTI WINKWINK TROVATI:", wwResult.rows.length);
