@@ -196,21 +196,27 @@ router.post("/contacts/sync", async (req, res) => {
 
     const wwResult = await pool.query(
      `SELECT 
-        id AS "userId", -- Torna a inviare un numero (INT), non testo
-        name, 
-        last_name AS "lastName", 
-        phone, 
-        public_key AS "publicKey",
-        id AS "peerId", 
-        COALESCE(fingerprint, '') AS fingerprint, 
-        version
+       id AS "id",                -- Numero per P2PSession
+       id::text AS "userId",      -- Stringa per WWContact
+       name AS "name",            -- Per WWContact
+       name AS "firstName",       -- Per UserProfile
+       last_name AS "lastName",   -- Per entrambi
+       phone, 
+       COALESCE(public_key, '') AS "publicKey",
+       COALESCE(qr_data, '') AS "qrData",
+       id AS "peerId",            -- Numero
+       COALESCE(fingerprint, '') AS "fingerprint",
+       COALESCE(version, 1) AS "version"
      FROM users 
-     WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
-         OR RIGHT(REPLACE(REPLACE(phone, '+', ''), ' ', ''), 9) = ANY(
-            SELECT RIGHT(u, 9) FROM unnest($1::text[]) u
-        )`,
+     WHERE 
+        REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
+        OR 
+        RIGHT(REPLACE(REPLACE(phone, '+', ''), ' ', ''), 9) = ANY(
+         SELECT RIGHT(u, 9) FROM unnest($1::text[]) u
+       )`,
      [phones]
     );
+
 
 
 
