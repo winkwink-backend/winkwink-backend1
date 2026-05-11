@@ -230,7 +230,7 @@ router.post("/contacts/sync", async (req, res) => {
   }
 });
 
-   export default router;
+export default router;
 
 
     const chatResult = await pool.query(
