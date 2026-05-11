@@ -196,25 +196,22 @@ router.post("/contacts/sync", async (req, res) => {
 
     const wwResult = await pool.query(
      `SELECT 
-       id::text AS "userId", 
-       name, 
-       last_name AS "lastName", 
-       phone, 
-       public_key AS "publicKey",
-       id::text AS "peerId", 
-       COALESCE(fingerprint, '') AS fingerprint, 
-       COALESCE(version, '1') AS version
+        id AS "userId", -- Torna a inviare un numero (INT), non testo
+        name, 
+        last_name AS "lastName", 
+        phone, 
+        public_key AS "publicKey",
+        id AS "peerId", 
+        COALESCE(fingerprint, '') AS fingerprint, 
+        version
      FROM users 
-     WHERE 
-         -- Cerca il numero togliendo tutto (pulisce il DB e l'input)
-         REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
-         OR 
-         -- TRUCCO: Confronta solo le ultime 9 cifre (funziona con o senza 39)
-         RIGHT(REPLACE(REPLACE(phone, '+', ''), ' ', ''), 9) = ANY(
+     WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
+         OR RIGHT(REPLACE(REPLACE(phone, '+', ''), ' ', ''), 9) = ANY(
             SELECT RIGHT(u, 9) FROM unnest($1::text[]) u
-         )`, 
-      [phones]
+        )`,
+     [phones]
     );
+
 
 
 
