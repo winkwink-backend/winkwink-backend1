@@ -11,6 +11,7 @@ router.post("/send-message", async (req, res) => {
     const { sender_id, receiver_id, content } = req.body;
     if (!sender_id || !receiver_id || !content)
       return res.status(400).json({ error: "Missing fields" });
+
     const result = await pool.query(
       "INSERT INTO messages (sender_id, receiver_id, content) VALUES ($1, $2, $3) RETURNING *",
       [sender_id, receiver_id, content]
@@ -67,12 +68,16 @@ router.delete("/delete-message/:id", async (req, res) => {
 router.post("/chat/create", async (req, res) => {
   try {
     const { user1, user2 } = req.body;
-    if (!user1 || !user2) return res.status(400).json({ error: "Missing users" });
+    if (!user1 || !user2)
+      return res.status(400).json({ error: "Missing users" });
+
     const existing = await pool.query(
       "SELECT id FROM chats WHERE (user1 = $1 AND user2 = $2) OR (user1 = $2 AND user2 = $1)",
       [user1, user2]
     );
-    if (existing.rows.length > 0) return res.json({ chat_id: existing.rows[0].id });
+    if (existing.rows.length > 0)
+      return res.json({ chat_id: existing.rows[0].id });
+
     const result = await pool.query(
       "INSERT INTO chats (user1, user2) VALUES ($1, $2) RETURNING id",
       [user1, user2]
@@ -90,9 +95,9 @@ router.get("/chat/list/:user_id", async (req, res) => {
       `SELECT 
         c.id AS chat_id,
         u.id AS other_id,
-        u.name, -- nome reale nel DB
-        u.last_name, -- nome reale nel DB
-        u.public_key, -- aggiunto per permettere all'app di criptare/decriptare
+        u.name,
+        u.last_name,
+        u.public_key,
         (SELECT content FROM chat_messages WHERE chat_id = c.id ORDER BY created_at DESC LIMIT 1) AS last_message,
         (SELECT created_at FROM chat_messages WHERE chat_id = c.id ORDER BY created_at DESC LIMIT 1) AS last_timestamp
        FROM chats c
@@ -107,7 +112,6 @@ router.get("/chat/list/:user_id", async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
-
 
 router.post("/chat/send", async (req, res) => {
   try {
@@ -131,7 +135,7 @@ router.get("/chat/messages/:chat_id", async (req, res) => {
         sender_id, 
         content, 
         created_at,
-        'delivered' as status -- Valore richiesto a Pagina 3 del PDF
+        'delivered' as status
        FROM chat_messages 
        WHERE chat_id = $1 
        ORDER BY created_at ASC`,
@@ -143,7 +147,6 @@ router.get("/chat/messages/:chat_id", async (req, res) => {
   }
 });
 
-
 // ------------------------------------------------------------
 // CHAT — PING & ACTIVE USERS (Pagine 17-18)
 // ------------------------------------------------------------
@@ -152,7 +155,9 @@ router.post("/chat/ping", async (req, res) => {
     const { chat_id, user_id } = req.body;
     await pool.query(
       `INSERT INTO chat_active (chat_id, user_id, last_seen)
-       VALUES ($1, $2, NOW()) ON CONFLICT (chat_id, user_id) DO UPDATE SET last_seen = NOW()`,
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (chat_id, user_id)
+       DO UPDATE SET last_seen = NOW()`,
       [chat_id, user_id]
     );
     return res.json({ ok: true });
@@ -167,7 +172,7 @@ router.get("/chat/active/:chat_id", async (req, res) => {
       "SELECT user_id FROM chat_active WHERE chat_id = $1 AND last_seen > NOW() - INTERVAL '60 seconds'",
       [req.params.chat_id]
     );
-    return res.json({ active: result.rows.map(r => r.user_id) });
+    return res.json({ active: result.rows.map((r) => r.user_id) });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
@@ -191,23 +196,21 @@ router.post("/save-video", async (req, res) => {
 
 router.post("/contacts/sync", async (req, res) => {
   try {
-    let { phones, userId } = req.body;
-    if (!phones || !userId) return res.status(400).json({ error: "Missing data" });
-    
-    phones = phones.map(p => p.replace(/\s+/g, "").replace(/^\+/, ""));
+    let { phones, userId, originalNames } = req.body;
 
-    router.post("/contacts/sync", async (req, res) => {
-  try {
-    let { phones, userId } = req.body;
-    
-    // 🚩 GUARDA I LOG DI RAILWAY QUANDO PREMI IL TASTO NELL'APP
     console.log("📱 SYNC RICHIESTA DA USER:", userId);
     console.log("📞 NUMERI RICEVUTI:", phones ? phones.length : 0);
 
-    if (!phones || phones.length === 0) return res.json({ all_contacts: [], ww_contacts: [], chats: [] });
+    if (!phones || !userId)
+      return res.status(400).json({ error: "Missing data" });
 
-    // Normalizzazione numeri per il confronto
-    const cleanedPhones = phones.map(p => p.replace(/\s+/g, "").replace(/^\+/, ""));
+    if (!phones.length)
+      return res.json({ all_contacts: [], ww_contacts: [], chats: [], current_user: { id: userId } });
+
+    // Normalizzazione numeri
+    const cleanedPhones = phones.map((p) =>
+      p.replace(/\s+/g, "").replace(/^\+/, "")
+    );
 
     const wwResult = await pool.query(
       `SELECT id, name, last_name, phone, public_key, qr_data, peer_id, fingerprint, version 
@@ -215,41 +218,34 @@ router.post("/contacts/sync", async (req, res) => {
        WHERE RIGHT(REPLACE(phone, '+', ''), 9) = ANY(
          SELECT RIGHT(REPLACE(u, '+', ''), 9) FROM unnest($1::text[]) u
        )`,
-      [phones]
+      [cleanedPhones]
     );
 
-    return res.json({
-      ww_contacts: wwResult.rows, // Invia i nomi del DB: last_name, public_key, ecc.
-      all_contacts: [], 
-      chats: [],
-      current_user: { id: userId }
-    });
-  } catch (err) {
-    console.error("❌ ERRORE SYNC:", err.message);
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-export default router;
-
-
     const chatResult = await pool.query(
-      `SELECT c.id AS chat_id, CASE WHEN c.user1 = $1 THEN c.user2 ELSE c.user1 END AS other_id,
-       u.name AS other_name, (SELECT content FROM chat_messages WHERE chat_id = c.id ORDER BY created_at DESC LIMIT 1) AS last_message
-       FROM chats c JOIN users u ON u.id = CASE WHEN c.user1 = $1 THEN c.user2 ELSE c.user1 END
+      `SELECT 
+         c.id AS chat_id, 
+         CASE WHEN c.user1 = $1 THEN c.user2 ELSE c.user1 END AS other_id,
+         u.name AS other_name,
+         (SELECT content FROM chat_messages WHERE chat_id = c.id ORDER BY created_at DESC LIMIT 1) AS last_message
+       FROM chats c 
+       JOIN users u ON u.id = CASE WHEN c.user1 = $1 THEN c.user2 ELSE c.user1 END
        WHERE c.user1 = $1 OR c.user2 = $1`,
       [userId]
     );
 
-    const allContacts = phones.map(p => ({ phone: "+" + p, name: req.body.originalNames?.[p] ?? "" }));
+    const allContacts = cleanedPhones.map((p) => ({
+      phone: "+" + p,
+      name: originalNames?.[p] ?? "",
+    }));
 
     return res.json({
       all_contacts: allContacts,
       ww_contacts: wwResult.rows,
       chats: chatResult.rows,
-      current_user: { id: userId }
+      current_user: { id: userId },
     });
   } catch (err) {
+    console.error("❌ ERRORE SYNC:", err.message);
     return res.status(500).json({ error: "Server error" });
   }
 });
