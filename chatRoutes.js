@@ -87,11 +87,14 @@ router.get("/chat/list/:user_id", async (req, res) => {
   try {
     const { user_id } = req.params;
     const result = await pool.query(
-      `SELECT c.id AS chat_id,
-       CASE WHEN c.user1 = $1 THEN c.user2 ELSE c.user1 END AS other_id,
-       u.name AS other_name,
-       (SELECT content FROM chat_messages WHERE chat_id = c.id ORDER BY created_at DESC LIMIT 1) AS last_message,
-       (SELECT created_at FROM chat_messages WHERE chat_id = c.id ORDER BY created_at DESC LIMIT 1) AS last_timestamp
+      `SELECT 
+        c.id AS chat_id,
+        u.id AS other_id,
+        u.name, -- nome reale nel DB
+        u.last_name, -- nome reale nel DB
+        u.public_key, -- aggiunto per permettere all'app di criptare/decriptare
+        (SELECT content FROM chat_messages WHERE chat_id = c.id ORDER BY created_at DESC LIMIT 1) AS last_message,
+        (SELECT created_at FROM chat_messages WHERE chat_id = c.id ORDER BY created_at DESC LIMIT 1) AS last_timestamp
        FROM chats c
        JOIN users u ON u.id = CASE WHEN c.user1 = $1 THEN c.user2 ELSE c.user1 END
        WHERE c.user1 = $1 OR c.user2 = $1
@@ -100,9 +103,11 @@ router.get("/chat/list/:user_id", async (req, res) => {
     );
     return res.json({ chats: result.rows });
   } catch (err) {
+    console.error("❌ Errore recupero lista chat:", err.message);
     return res.status(500).json({ error: err.message });
   }
 });
+
 
 router.post("/chat/send", async (req, res) => {
   try {
@@ -120,14 +125,24 @@ router.post("/chat/send", async (req, res) => {
 router.get("/chat/messages/:chat_id", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT * FROM chat_messages WHERE chat_id = $1 ORDER BY created_at ASC",
+      `SELECT 
+        id, 
+        chat_id, 
+        sender_id, 
+        content, 
+        created_at,
+        'delivered' as status -- Valore richiesto a Pagina 3 del PDF
+       FROM chat_messages 
+       WHERE chat_id = $1 
+       ORDER BY created_at ASC`,
       [req.params.chat_id]
     );
-    return res.json({ messages: result.rows });
+    res.json({ messages: result.rows });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
+
 
 // ------------------------------------------------------------
 // CHAT — PING & ACTIVE USERS (Pagine 17-18)
@@ -195,47 +210,27 @@ router.post("/contacts/sync", async (req, res) => {
     const cleanedPhones = phones.map(p => p.replace(/\s+/g, "").replace(/^\+/, ""));
 
     const wwResult = await pool.query(
-     `SELECT 
-       id AS "id",                -- Numero per P2PSession
-       id::text AS "userId",      -- Stringa per WWContact
-       name AS "name",            -- Per WWContact
-       name AS "firstName",       -- Per UserProfile
-       last_name AS "lastName",   -- Per entrambi
-       phone, 
-       COALESCE(public_key, '') AS "publicKey",
-       COALESCE(qr_data, '') AS "qrData",
-       id AS "peerId",            -- Numero
-       COALESCE(fingerprint, '') AS "fingerprint",
-       COALESCE(version, 1) AS "version"
-     FROM users 
-     WHERE 
-        REPLACE(REPLACE(phone, '+', ''), ' ', '') = ANY($1)
-        OR 
-        RIGHT(REPLACE(REPLACE(phone, '+', ''), ' ', ''), 9) = ANY(
-         SELECT RIGHT(u, 9) FROM unnest($1::text[]) u
+      `SELECT id, name, last_name, phone, public_key, qr_data, peer_id, fingerprint, version 
+       FROM users 
+       WHERE RIGHT(REPLACE(phone, '+', ''), 9) = ANY(
+         SELECT RIGHT(REPLACE(u, '+', ''), 9) FROM unnest($1::text[]) u
        )`,
-     [phones]
+      [phones]
     );
 
-
-
-
-
-    console.log("✅ CONTATTI WINKWINK TROVATI:", wwResult.rows.length);
-
-    res.json({
-      all_contacts: phones.map(p => ({ phone: p, name: "" })),
-      ww_contacts: wwResult.rows,
-      chats: [] // o la tua query delle chat
+    return res.json({
+      ww_contacts: wwResult.rows, // Invia i nomi del DB: last_name, public_key, ecc.
+      all_contacts: [], 
+      chats: [],
+      current_user: { id: userId }
     });
   } catch (err) {
     console.error("❌ ERRORE SYNC:", err.message);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
 
-
-
+   export default router;
 
 
     const chatResult = await pool.query(
