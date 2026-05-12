@@ -1,10 +1,11 @@
 import express from "express";
 import pool from "./db.js";
+import { sendFCM } from "./firebase-config.js";
 
 const router = express.Router();
 
 // ------------------------------------------------------------
-// MESSAGING — HTTP (Pagine 13-14)
+// MESSAGING — HTTP 
 // ------------------------------------------------------------
 router.post("/send-message", async (req, res) => {
   try {
@@ -16,6 +17,48 @@ router.post("/send-message", async (req, res) => {
       "INSERT INTO messages (sender_id, receiver_id, content) VALUES ($1, $2, $3) RETURNING *",
       [sender_id, receiver_id, content]
     );
+    const savedMessage = result.rows[0];
+
+    // --- AGGIUNTA PATCH 1: REFRESH WEBSOCKET ---
+    if (req.io) {
+      // Usiamo una logica di "stanza" basata sugli ID degli utenti per il refresh
+      // (SignalingService usi la stessa chiave per ascoltare?)
+      req.io.emit("new_message", {
+        payload: {
+          senderId: parseInt(sender_id),
+          receiverId: parseInt(receiver_id),
+          content: savedMessage.content,
+          createdAt: savedMessage.created_at,
+          type: "text"
+        }
+      });
+    }
+
+    // --- AGGIUNTA PATCH 2: NOTIFICA PUSH FCM ---
+    try {
+      const userRes = await pool.query(
+        "SELECT fcm_token, name FROM users WHERE id = $1",
+        [receiver_id]
+      );
+      const senderRes = await pool.query(
+        "SELECT name FROM users WHERE id = $1",
+        [sender_id]
+      );
+
+      if (userRes.rows[0] && userRes.rows[0].fcm_token) {
+        await sendFCM({
+          token: userRes.rows[0].fcm_token,
+          title: `Messaggio da ${senderRes.rows[0]?.name || "WinkWink"}`,
+          body: content,
+          data: {
+            type: "chat",
+            senderId: String(sender_id),
+          }
+        });
+      }
+    } catch (fcmErr) {
+      console.log("Notifica non inviata:", fcmErr.message);
+    }
     res.json({ status: "ok", message: result.rows[0] });
   } catch (err) {
     res.status(500).json({ error: err.message });
