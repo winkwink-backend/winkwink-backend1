@@ -171,40 +171,78 @@ router.get("/chat/list/:user_id", async (req, res) => {
 router.post("/chat/send", async (req, res) => {
   try {
     const { chat_id, sender_id, content } = req.body;
-    console.log(`🔎 [BACKEND] Ricevuta richiesta di invio per chat_${chat_id}`);
+    console.log(`🔎 [BACKEND] Ricevuta richiesta di invio per chat_${chat_id} da user_${sender_id}`);
     
+    if (!chat_id || !sender_id || !content) {
+      return res.status(400).json({ error: "Missing fields" });
+    }
+
+    // 1️⃣ INSERIMENTO NELLA TABELLA FUNZIONANTE
     const result = await pool.query(
       "INSERT INTO chat_messages (chat_id, sender_id, content) VALUES ($1, $2, $3) RETURNING *",
       [chat_id, sender_id, content]
     );
     
-    // ⭐ ESTRAZIONE CORRETTA: prendi il primo oggetto dell'array restituito da PostgreSQL
     const savedMessage = result.rows[0]; 
     console.log(`🔎 [BACKEND] Messaggio salvato con successo. ID: ${savedMessage.id}`);
 
+    // 2️⃣ DISTRIBUZIONE WEBSOCKET (REFRESH) - FUNZIONANTE
     if (req.io) {
-      // Configurazione del payload
       const socketPayload = {
         payload: {
           chatId: parseInt(chat_id),
           senderId: parseInt(sender_id),
-          content: savedMessage.content,       // Ora legge correttamente il testo della riga
-          createdAt: savedMessage.created_at, // Ora legge correttamente il timestamp della riga
+          content: savedMessage.content,
+          createdAt: savedMessage.created_at,
           type: "text"
         }
       };
       
-      // Spedisce il messaggio a tutti i membri della stanza
       req.io.to(`chat_${chat_id}`).emit("new_message", socketPayload);
       console.log(`📡 [BACKEND] Evento 'new_message' inviato alla stanza chat_${chat_id}`);
-    } else {
-      console.log("❌ [BACKEND] ERRORE: req.io non è configurato nel middleware!");
     }
 
-    // Risposta HTTP che vediamo nei tuoi log Flutter
+    // 3️⃣ ⭐ LA PATCH NOTIFICHE INTEGRATA NELLA ROTTA REALE
+    try {
+      // Cerchiamo chi è l'altro utente all'interno della tabella 'chats'
+      const userRes = await pool.query(
+        `SELECT u.fcm_token, 
+               (SELECT name FROM users WHERE id = $1) as sender_name 
+         FROM users u
+         JOIN chats c ON (u.id = c.user1 OR u.id = c.user2)
+         WHERE c.id = $2 AND u.id != $1 LIMIT 1`,
+        [sender_id, chat_id]
+      );
+
+      const recipientData = userRes.rows[0];
+
+      if (recipientData && recipientData.fcm_token) {
+        console.log(`🔎 [BACKEND FCM] Token trovato. Invio notifica push a schermo bloccato...`);
+        
+        await sendFCM({
+          token: recipientData.fcm_token,
+          title: `Messaggio da ${recipientData.sender_name || "WinkWink"}`,
+          body: content,
+          data: {
+            type: "chat",
+            chatId: String(chat_id),
+            senderId: String(sender_id)
+          }
+        });
+        
+        console.log(`🔔 [BACKEND FCM] Notifica push inviata con successo via Firebase!`);
+      } else {
+        console.log(`⚠️ [BACKEND FCM] Nessun token valido registrato nel DB per l'altro utente.`);
+      }
+    } catch (fcmErr) {
+      console.log("⚠️ [BACKEND FCM ERRORE PROCESSO]:", fcmErr.message);
+    }
+
+    // Risposta HTTP per Flutter
     return res.json({ status: "ok", message: savedMessage });
+
   } catch (err) {
-    console.error("❌ [BACKEND ERRORE]:", err.message);
+    console.error("❌ [BACKEND CRITICAL ERROR]:", err.message);
     return res.status(500).json({ error: err.message });
   }
 });
