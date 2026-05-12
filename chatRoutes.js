@@ -116,15 +116,36 @@ router.get("/chat/list/:user_id", async (req, res) => {
 router.post("/chat/send", async (req, res) => {
   try {
     const { chat_id, sender_id, content } = req.body;
+    
     const result = await pool.query(
       "INSERT INTO chat_messages (chat_id, sender_id, content) VALUES ($1, $2, $3) RETURNING *",
       [chat_id, sender_id, content]
     );
-    return res.json({ message: result.rows[0] });
+    
+    // ⭐ ESTRAZIONE CORRETTA: prendi il primo oggetto dell'array restituito da PostgreSQL
+    const savedMessage = result.rows[0]; 
+
+    if (req.io) {
+      // Invia il payload formattato con i dati reali del database
+      req.io.to(`chat_${chat_id}`).emit("new_message", {
+        payload: {
+          chatId: parseInt(chat_id),
+          senderId: parseInt(sender_id),
+          content: savedMessage.content,       // Ora non è più undefined
+          createdAt: savedMessage.created_at, // Ora ha il timestamp corretto del DB
+          type: "text"
+        }
+      });
+      console.log(`📡 [WS GLOBAL] Messaggio distribuito in tempo reale alla stanza: chat_${chat_id}`);
+    }
+
+    // Risposta HTTP che vediamo nei tuoi log Flutter
+    return res.json({ status: "ok", message: savedMessage });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 });
+
 
 router.get("/chat/messages/:chat_id", async (req, res) => {
   try {
