@@ -13,11 +13,23 @@ import chatRoutes from "./chatRoutes.js";
 import { registerSocketHandlers } from "./socketHandlers.js";
 console.log("📍 IL FILE SOCKETHANDLERS È CARICATO DA QUI:", import.meta.url);
 
+// 1️⃣ INIZIALIZZAZIONE DELL'APPLICAZIONE EXPRESS
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 3️⃣ AGGIUNGI IL MIDDLEWARE GLOBALE (Nuovo codice aggiunto qui)
+// 2️⃣ INIZIALIZZAZIONE DELLE MAPPE GLOBALI PER UTENTI E STANZE
+const onlineUsers = new Map();
+const chatRooms = new Map();
+
+// 3️⃣ CREAZIONE DEL SERVER HTTP E DI SOCKET.IO UTILIZZANDO L'ISTANZA EXPRESS APP
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: { origin: "*", methods: ["GET", "POST"] }
+});
+
+// 4️⃣ CONFIGURAZIONE DEL MIDDLEWARE GLOBALE
+// Fornisce l'istanza io e le mappe a tutte le richieste HTTP successive (es. in chatRoutes.js)
 app.use((req, res, next) => {
   req.io = io;
   req.onlineUsers = onlineUsers;
@@ -25,37 +37,28 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rotte HTTP normali
+// 5️⃣ REGISTRAZIONE DELLE ROTTE DELLE FUNZIONALITÀ HTTP
 app.use(authRoutes);
 app.use(p2pRoutes);
 app.use(chatRoutes);
 
-// Root
+// Rotta Radice per il controllo dello stato dell'istanza
 app.get("/", (req, res) => res.send("Backend WinkWink attivo e modulare"));
 
-const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: { origin: "*", methods: ["GET", "POST"] }
-});
-
-// ⭐ QUI CREI LE MAPPE (ora esistono)
-const onlineUsers = new Map();
-const chatRooms = new Map();
-
-// ⭐ QUI REGISTRI I SOCKET
+// 6️⃣ REGISTRAZIONE DEI GESTORI EVENTI WEBSOCKET
 io.on("connection", (socket) => {
   registerSocketHandlers(io, socket, pool, onlineUsers, chatRooms);
 });
 
 // ------------------------------------------------------------
-// ⭐ HTTP: FILE ACCEPT (quando l'app è chiusa)
+// ⭐ HTTP: FILE ACCEPT (Gestione trasferimento quando l'app è in background/chiusa)
 // ------------------------------------------------------------
 app.post("/file_accept_http", async (req, res) => {
     const { sessionId, userId } = req.body;
 
     console.log("🔥 [DEBUG] /file_accept_http ARRIVATO", { sessionId, userId });
 
-    // 1️⃣ Verifica sessione
+    // 1️⃣ Verifica l'esistenza e validità della sessione nel Database
     const result = await pool.query(
         "SELECT from_user_id FROM p2p_sessions WHERE session_id = $1",
         [sessionId]
@@ -72,7 +75,7 @@ app.post("/file_accept_http", async (req, res) => {
 
     console.log("🔥 [DEBUG] MITTENTE (toUserId):", toUserId);
 
-    // 2️⃣ Verifica se il mittente è online
+    // 2️⃣ Verifica se il mittente originale è attualmente connesso al socket
     const target = onlineUsers.get(toUserId);
 
     console.log("🔥 [DEBUG] SOCKET MITTENTE TROVATO?", {
@@ -104,8 +107,7 @@ app.post("/file_accept_http", async (req, res) => {
     res.json({ ok: true });
 });
 
-
-
+// 7️⃣ AVVIO DEL SERVER SULLA PORTA ASSEGNATA
 const PORT = process.env.PORT || 10000;
 httpServer.listen(PORT, () => {
   console.log(`🚀 Server + WebSocket pronti sulla porta ${PORT}`);
