@@ -13,6 +13,8 @@ router.post("/send-message", async (req, res) => {
     if (!sender_id || !receiver_id || !content)
       return res.status(400).json({ error: "Missing fields" });
 
+    console.log(`🔎 [BACKEND FCM] Invio messaggio da user ${sender_id} a user ${receiver_id}`);
+
     const result = await pool.query(
       "INSERT INTO messages (sender_id, receiver_id, content) VALUES ($1, $2, $3) RETURNING *",
       [sender_id, receiver_id, content]
@@ -21,8 +23,6 @@ router.post("/send-message", async (req, res) => {
 
     // --- AGGIUNTA PATCH 1: REFRESH WEBSOCKET ---
     if (req.io) {
-      // Usiamo una logica di "stanza" basata sugli ID degli utenti per il refresh
-      // (SignalingService usi la stessa chiave per ascoltare?)
       req.io.emit("new_message", {
         payload: {
           senderId: parseInt(sender_id),
@@ -32,38 +32,50 @@ router.post("/send-message", async (req, res) => {
           type: "text"
         }
       });
+      console.log(`📡 [WS GLOBAL] Messaggio distribuito via socket.`);
     }
 
     // --- AGGIUNTA PATCH 2: NOTIFICA PUSH FCM ---
     try {
       const userRes = await pool.query(
-        "SELECT fcm_token, name FROM users WHERE id = $1",
-        [receiver_id]
+        `SELECT fcm_token, 
+               (SELECT name FROM users WHERE id = $1) as sender_name 
+         FROM users WHERE id = $2`,
+        [sender_id, receiver_id]
       );
-      const senderRes = await pool.query(
-        "SELECT name FROM users WHERE id = $1",
-        [sender_id]
-      );
+      
+      const recipientData = userRes.rows[0];
 
-      if (userRes.rows[0] && userRes.rows[0].fcm_token) {
+      if (recipientData && recipientData.fcm_token) {
+        console.log(`🔎 [BACKEND FCM] Token trovato per il destinatario. Invio notifica push...`);
+        
         await sendFCM({
-          token: userRes.rows[0].fcm_token,
-          title: `Messaggio da ${senderRes.rows[0]?.name || "WinkWink"}`,
+          token: recipientData.fcm_token,
+          title: `Messaggio da ${recipientData.sender_name || "WinkWink"}`,
           body: content,
           data: {
             type: "chat",
             senderId: String(sender_id),
+            receiverId: String(receiver_id)
           }
         });
+        console.log(`🔔 [BACKEND FCM] Notifica push inviata con successo.`);
+      } else {
+        console.log(`⚠️ [BACKEND FCM] Nessun token valido trovato per user ${receiver_id}`);
       }
     } catch (fcmErr) {
-      console.log("Notifica non inviata:", fcmErr.message);
+      console.log("⚠️ [BACKEND FCM ERRORE]: Notifica non inviata:", fcmErr.message);
     }
-    res.json({ status: "ok", message: result.rows[0] });
+
+    // Ritorna la risposta HTTP nativa attesa da Flutter
+    return res.json({ status: "ok", message: savedMessage });
+
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("❌ [BACKEND CRITICAL ERROR]:", err.message);
+    return res.status(500).json({ error: err.message });
   }
 });
+
 
 router.get("/messages/:user1/:user2", async (req, res) => {
   try {
