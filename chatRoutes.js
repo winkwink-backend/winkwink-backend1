@@ -116,6 +116,7 @@ router.get("/chat/list/:user_id", async (req, res) => {
 router.post("/chat/send", async (req, res) => {
   try {
     const { chat_id, sender_id, content } = req.body;
+    console.log(`🔎 [BACKEND] Ricevuta richiesta di invio per chat_${chat_id}`);
     
     const result = await pool.query(
       "INSERT INTO chat_messages (chat_id, sender_id, content) VALUES ($1, $2, $3) RETURNING *",
@@ -124,27 +125,35 @@ router.post("/chat/send", async (req, res) => {
     
     // ⭐ ESTRAZIONE CORRETTA: prendi il primo oggetto dell'array restituito da PostgreSQL
     const savedMessage = result.rows[0]; 
+    console.log(`🔎 [BACKEND] Messaggio salvato con successo. ID: ${savedMessage.id}`);
 
     if (req.io) {
-      // Invia il payload formattato con i dati reali del database
-      req.io.to(`chat_${chat_id}`).emit("new_message", {
+      // Configurazione del payload
+      const socketPayload = {
         payload: {
           chatId: parseInt(chat_id),
           senderId: parseInt(sender_id),
-          content: savedMessage.content,       // Ora non è più undefined
-          createdAt: savedMessage.created_at, // Ora ha il timestamp corretto del DB
+          content: savedMessage.content,       // Ora legge correttamente il testo della riga
+          createdAt: savedMessage.created_at, // Ora legge correttamente il timestamp della riga
           type: "text"
         }
-      });
-      console.log(`📡 [WS GLOBAL] Messaggio distribuito in tempo reale alla stanza: chat_${chat_id}`);
+      };
+      
+      // Spedisce il messaggio a tutti i membri della stanza
+      req.io.to(`chat_${chat_id}`).emit("new_message", socketPayload);
+      console.log(`📡 [BACKEND] Evento 'new_message' inviato alla stanza chat_${chat_id}`);
+    } else {
+      console.log("❌ [BACKEND] ERRORE: req.io non è configurato nel middleware!");
     }
 
     // Risposta HTTP che vediamo nei tuoi log Flutter
     return res.json({ status: "ok", message: savedMessage });
   } catch (err) {
+    console.error("❌ [BACKEND ERRORE]:", err.message);
     return res.status(500).json({ error: err.message });
   }
 });
+
 
 
 router.get("/chat/messages/:chat_id", async (req, res) => {
