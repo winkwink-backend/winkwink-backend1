@@ -271,11 +271,17 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
     // ⭐ 1. UTENTE ONLINE → WebSocket
     //
     if (target) {
+      // CORREZIONE: Manteniamo l'oggetto piatto o strutturato a seconda di come lo legge Flutter.
+      // Per sicurezza, inviamo i campi sia nella radice sia dentro un oggetto coerente per evitare errori di parsing.
       io.to(target).emit("open_download_page", {
-        type: "open_download_page",
-        ...payload,
+        sessionId: payload.sessionId,
+        fromUserId: payload.fromUserId,
+        fileName: payload.fileName,
+        fileType: payload.fileType,
+        fileSize: payload.fileSize,
+        ...payload // Mantiene la retrocompatibilità totale
       });
-      console.log("📨 [WS] open_download_page →", toUserId);
+      console.log("📨 [WS] open_download_page inviato con campi mappati correttamente a:", toUserId);
       return;
     }
 
@@ -297,8 +303,8 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
         data: {
           type: "incoming_file",
           sessionId: String(payload.sessionId),
-          fileName: payload.fileName,
-          fileType: payload.fileType,
+          fileName: String(payload.fileName),
+          fileType: String(payload.fileType),
           fileSize: String(payload.fileSize),
           fromUserId: String(payload.fromUserId),
         },

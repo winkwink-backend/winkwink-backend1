@@ -17,6 +17,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// 3️⃣ AGGIUNGI IL MIDDLEWARE GLOBALE (Nuovo codice aggiunto qui)
+app.use((req, res, next) => {
+  req.io = io;
+  req.onlineUsers = onlineUsers;
+  req.chatRooms = chatRooms;
+  next();
+});
+
 // Rotte HTTP normali
 app.use(authRoutes);
 app.use(p2pRoutes);
