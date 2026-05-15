@@ -80,17 +80,21 @@ router.post("/p2p/session/create", async (req, res) => {
       );
       const senderName = sender.rows[0]?.name ?? "";
 
+      // 🔥 PATCH: costruisco il payload SENZA campi vuoti
+      const data = {
+        type: "incoming_file",
+        sessionId: String(sessionId),
+        fromUserId: String(from_user_id),
+        senderName: senderName,
+      };
+
+      if (fileName) data.fileName = String(fileName);
+      if (fileType) data.fileType = String(fileType);
+      if (fileSize) data.fileSize = String(fileSize);
+
       await admin.messaging().send({
         token: token,
-        data: {
-          type: "incoming_file",
-          sessionId: String(sessionId),
-          fileName: String(fileName ?? ""),
-          fileType: String(fileType ?? ""),
-          fileSize: String(fileSize ?? ""),
-          fromUserId: String(from_user_id),
-          senderName: senderName,
-        },
+        data,
         android: { priority: "high" },
       });
 
@@ -182,3 +186,4 @@ router.get("/p2p/chat/candidates", async (req, res) => {
 });
 
 export default router;
+
