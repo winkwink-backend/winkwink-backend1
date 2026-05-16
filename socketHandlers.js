@@ -6,7 +6,7 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
     console.log(`📡 [DEBUG] Ricevuto evento: ${eventName}`, args);
   });
 
-  // 🛰️ RADAR: Stampa TUTTI gli eventi che arrivano dai cellulari
+  // 📡 RADAR: Stampa TUTTI gli eventi che arrivano dai cellulari
   socket.onAny((eventName, ...args) => {
     console.log(`📡 [WS EVENT] Ricevuto: "${eventName}" con dati:`, JSON.stringify(args));
   });
@@ -15,26 +15,25 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
   // PRESENZA E REGISTRAZIONE
   // ------------------------------------------------------------
   socket.on("register", (userId) => {
-    console.log("🔥 [DEBUG] REGISTER CHIAMATO", { userId, socketId: socket.id });
+    console.log("📡 [DEBUG] REGISTER CHIAMATO", { userId, socketId: socket.id });
     socket.userId = userId;
     onlineUsers.set(userId, socket.id);
-    console.log("📨 [WS] Utente registrato:", userId);
-    console.log("🔥 [DEBUG] onlineUsers:", Array.from(onlineUsers.entries()));
+    console.log("📡 [WS] Utente registrato:", userId);
+    console.log("📡 [DEBUG] onlineUsers:", Array.from(onlineUsers.entries()));
     io.emit("user_online", { userId });
   });
 
   socket.on("disconnect", (reason) => {
-    console.log("📨 [WS] Disconnessione:", { socketId: socket.id, userId: socket.userId, reason });
+    console.log("📡 [WS] Disconnessione:", { socketId: socket.id, userId: socket.userId, reason });
 
     if (socket.userId) {
         onlineUsers.delete(socket.userId);
-        console.log("🔥 [DEBUG] DELETE ESEGUITO → onlineUsers:", Array.from(onlineUsers.entries()));
+        console.log("📡 [DEBUG] DELETE ESEGUITO → onlineUsers:", Array.from(onlineUsers.entries()));
         io.emit("user_offline", { userId: socket.userId });
     } else {
-        console.log("🔥 [DEBUG] DISCONNECT SENZA USERID");
+        console.log("📡 [DEBUG] DISCONNECT SENZA USERID");
     }
   });
-
 
   // ------------------------------------------------------------
   // GESTIONE CHAT
@@ -47,7 +46,7 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
     io.to(socket.id).emit("chat_joined", { chat_id });
     io.emit("user_in_chat", { chat_id, user_id });
 
-    console.log(`📨 Utente ${user_id} entrato nella chat ${chat_id}`);
+    console.log(`📡 Utente ${user_id} entrato nella chat ${chat_id}`);
   });
 
   socket.on("leave_chat", ({ chat_id, user_id }) => {
@@ -101,126 +100,132 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
     if (target) io.to(target).emit("ice_candidate", { from: socket.userId, candidate });
   });
 
-
-
   // ------------------------------------------------------------
   // crea sessione
   // ------------------------------------------------------------
-
   socket.on("create_session", async (data) => {
-  const {
-    sessionId,
-    fromUserId,
-    toUserId,
-    fileName,
-    fileType,
-    fileSize,
-  } = data;
-
-  try {
-    console.log("📦 [WS] create_session ricevuto:", {
+    const {
       sessionId,
       fromUserId,
       toUserId,
       fileName,
       fileType,
       fileSize,
-    });
+    } = data;
 
-    // 1️⃣ SALVA SUBITO LA SESSIONE (operazione atomica)
-    await pool.query(
-      `INSERT INTO p2p_sessions
-        (session_id, from_user_id, to_user_id, file_name, file_type, file_size)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (session_id) DO NOTHING`,
-      [sessionId, fromUserId, toUserId, fileName, fileType, fileSize]
-    );
+    try {
+      console.log("📡 [WS] create_session ricevuto:", {
+        sessionId,
+        fromUserId,
+        toUserId,
+        fileName,
+        fileType,
+        fileSize,
+      });
 
-    console.log(`✅ [WS] Sessione salvata in p2p_sessions: ${sessionId}`);
-  } catch (err) {
-    console.error("❌ [WS] Errore in create_session:", err.message);
-  }
-});
+      // 1️⃣ SALVA SUBITO LA SESSIONE (operazione atomica)
+      await pool.query(
+        `INSERT INTO p2p_sessions
+          (session_id, from_user_id, to_user_id, file_name, file_type, file_size)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (session_id) DO NOTHING`,
+        [sessionId, fromUserId, toUserId, fileName, fileType, fileSize]
+      );
 
-
+      console.log(`✅ [WS] Sessione salvata in p2p_sessions: ${sessionId}`);
+    } catch (err) {
+      console.error("❌ [WS] Errore in create_session:", err.message);
+    }
+  });
 
   // ------------------------------------------------------------
   // FILE TRANSFER (REQUEST / ACCEPT / REJECT)
   // ------------------------------------------------------------
-
   socket.on("file_request", async ({ sessionId }) => {
-  try {
-    const result = await pool.query(
-      "SELECT from_user_id, to_user_id FROM p2p_sessions WHERE session_id = $1",
-      [sessionId]
-    );
+    try {
+      // ✨ FIX: Estraiamo anche file_name, file_type e file_size salvati precedentemente nel DB con create_session
+      const result = await pool.query(
+        "SELECT from_user_id, to_user_id, file_name, file_type, file_size FROM p2p_sessions WHERE session_id = $1",
+        [sessionId]
+      );
 
-    if (result.rows.length === 0) {
-      console.log("⚠️ [FILE_REQUEST] Nessuna sessione trovata per", sessionId);
-      return;
-    }
+      if (result.rows.length === 0) {
+        console.log("📡 [FILE_REQUEST] Nessuna sessione trouvata per", sessionId);
+        return;
+      }
 
-    const { from_user_id, to_user_id } = result.rows[0];
+      const { from_user_id, to_user_id, file_name, file_type, file_size } = result.rows[0];
 
-    // 🔥 Recupero nome/cognome del mittente
-    const userRes = await pool.query(
-      "SELECT name, last_name  FROM users WHERE id = $1",
-      [from_user_id]
-    );
+      // Creazione di valori di fallback stabili se i dati nel DB sono nulli
+      const dbFileName = file_name || "file_condiviso";
+      const dbFileType = file_type || "image";
+      const dbFileSize = file_size ? String(file_size) : "0";
 
-    const senderName = userRes.rows[0]?.name || "";
-    const senderSurname = userRes.rows[0]?.last_name  || "";
+      // 📡 Recupero nome/cognome del mittente
+      const userRes = await pool.query(
+        "SELECT name, last_name FROM users WHERE id = $1",
+        [from_user_id]
+      );
 
-    const target = onlineUsers.get(to_user_id);
+      const senderName = userRes.rows[0]?.name || "";
+      const senderSurname = userRes.rows[0]?.last_name || "";
 
-    //
-    // ⭐ 1. UTENTE ONLINE → WebSocket
-    //
-    if (target) {
-      io.to(target).emit("incoming_file", {
-        sessionId,
-        fromUserId: from_user_id,
-        senderName,
-        senderSurname,
+      const target = onlineUsers.get(to_user_id);
+
+      //
+      // ⭐ 1. UTENTE ONLINE → WebSocket
+      //
+      if (target) {
+        io.to(target).emit("incoming_file", {
+          sessionId,
+          fromUserId: from_user_id,
+          senderName,
+          senderSurname,
+          fileName: dbFileName, // ✨ Popolato in Realtime
+          fileType: dbFileType, // ✨ Popolato in Realtime
+          fileSize: parseInt(dbFileSize) // ✨ Popolato in Realtime
+        });
+        console.log("📡 [WS] incoming_file → utente online", to_user_id);
+        return;
+      }
+
+      //
+      // ⭐ 2. UTENTE OFFLINE → FCM (incoming_file)
+      //
+      console.log("📡 [FILE_REQUEST] Utente offline, uso FCM per", to_user_id);
+
+      const tokenRes = await pool.query(
+        "SELECT fcm_token FROM users WHERE id = $1",
+        [to_user_id]
+      );
+
+      const token = tokenRes.rows[0]?.fcm_token;
+
+      if (!token) {
+        console.log("📡 [FILE_REQUEST] Nessun token FCM per", to_user_id);
+        return;
+      }
+
+      // ✨ FIX DEFINITIVO: Inviamo a FCM l'oggetto completo ricavato dalla query
+      await sendFCM({
+        token,
+        data: {
+          type: "incoming_file",
+          sessionId: String(sessionId),
+          fromUserId: String(from_user_id),
+          senderName,
+          senderSurname,
+          fileName: dbFileName, // ✨ Invio corretto al telefono
+          fileType: dbFileType, // ✨ Invio corretto al telefono
+          fileSize: dbFileSize  // ✨ Invio corretto al telefono come testo
+        },
       });
-      console.log("📨 [WS] incoming_file → utente online", to_user_id);
-      return;
+
+      console.log(`📡 [FCM] incoming_file → inviato con metadati completi a ${to_user_id}`);
+    } catch (err) {
+      console.error("❌ [FILE_REQUEST] Errore:", err.message);
     }
-
-    //
-    // ⭐ 2. UTENTE OFFLINE → FCM (incoming_file)
-    //
-    console.log("📵 [FILE_REQUEST] Utente offline, uso FCM per", to_user_id);
-
-    const tokenRes = await pool.query(
-      "SELECT fcm_token FROM users WHERE id = $1",
-      [to_user_id]
-    );
-
-    const token = tokenRes.rows[0]?.fcm_token;
-
-    if (!token) {
-      console.log("⚠️ [FILE_REQUEST] Nessun token FCM per", to_user_id);
-      return;
-    }
-
-    await sendFCM({
-      token,
-      data: {
-        type: "incoming_file",
-        sessionId: String(sessionId),
-        fromUserId: String(from_user_id),
-        senderName,
-        senderSurname,
-      },
-    });
-
-    console.log("📨 [FCM] incoming_file →", to_user_id);
-  } catch (err) {
-    console.error("❌ [FILE_REQUEST] Errore:", err.message);
-  }
-});
-
+  });
 
   socket.on("file_reject", async ({ sessionId }) => {
     const result = await pool.query(
@@ -263,7 +268,7 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
   // NOTIFICA APERTURA PAGINA DOWNLOAD (WAKE UP)
   // ------------------------------------------------------------
   socket.on("open_download_page", async ({ toUserId, payload }) => {
-    console.log("📨 [WS] open_download_page ricevuto:", { toUserId, payload });
+    console.log("📡 [WS] open_download_page ricevuto:", { toUserId, payload });
 
     const target = onlineUsers.get(toUserId);
 
@@ -271,8 +276,6 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
     // ⭐ 1. UTENTE ONLINE → WebSocket
     //
     if (target) {
-      // CORREZIONE: Manteniamo l'oggetto piatto o strutturato a seconda di come lo legge Flutter.
-      // Per sicurezza, inviamo i campi sia nella radice sia dentro un oggetto coerente per evitare errori di parsing.
       io.to(target).emit("open_download_page", {
         sessionId: payload.sessionId,
         fromUserId: payload.fromUserId,
@@ -281,14 +284,14 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
         fileSize: payload.fileSize,
         ...payload // Mantiene la retrocompatibilità totale
       });
-      console.log("📨 [WS] open_download_page inviato con campi mappati correttamente a:", toUserId);
+      console.log("📡 [WS] open_download_page inviato con campi mappati correttamente a:", toUserId);
       return;
     }
 
     //
     // ⭐ 2. UTENTE OFFLINE → FCM (incoming_file, NON open_download_page)
     //
-    console.log("📵 Utente offline → invio FCM incoming_file");
+    console.log("📡 Utente offline → invio FCM incoming_file");
 
     const userRes = await pool.query(
       "SELECT fcm_token FROM users WHERE id = $1",
@@ -310,9 +313,9 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
         },
       });
 
-      console.log("📨 [FCM] incoming_file →", toUserId);
+      console.log("📡 [FCM] incoming_file →", toUserId);
     } else {
-      console.log("⚠️ Nessun token FCM per", toUserId);
+      console.log("📡 Nessun token FCM per", toUserId);
     }
   });
 };
