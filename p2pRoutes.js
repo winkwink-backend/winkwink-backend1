@@ -38,6 +38,19 @@ router.get("/p2p/session/folder_response/:sessionId", async (req, res) => {
   return res.json(resp);
 });
 
+// ------------------------------------------------------------
+// ⭐ CHECK FOLDER (mittente → server)
+// ------------------------------------------------------------
+router.post("/p2p/session/check_folder", async (req, res) => {
+  const { sessionId, path } = req.body;
+
+  console.log("📂 [BACKEND] POST check_folder ARRIVATO:", req.body);
+
+  // Non serve salvare nulla: il ricevente risponde con folder_response
+  return res.json({ ok: true });
+});
+
+
 
 // ------------------------------------------------------------
 // INBOX (Pagina 6-7)
