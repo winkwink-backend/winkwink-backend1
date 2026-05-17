@@ -6,6 +6,40 @@ import admin from "./firebase-config.js";
 const router = express.Router();
 
 // ------------------------------------------------------------
+// ⭐ FOLDER RESPONSE (mittente ↔ ricevente)
+// ------------------------------------------------------------
+
+// Mappa globale per salvare le risposte
+global.folderResponses = global.folderResponses || {};
+
+// 🔵 RICEVENTE → invia risposta cartella
+router.post("/p2p/session/folder_response", async (req, res) => {
+  const { sessionId, status, error } = req.body;
+
+  console.log("📡 [BACKEND] POST folder_response ARRIVATO:", req.body);
+
+  global.folderResponses[sessionId] = { status, error };
+
+  return res.json({ ok: true });
+});
+
+// 🔵 MITTENTE → chiede la risposta
+router.get("/p2p/session/folder_response/:sessionId", async (req, res) => {
+  const sessionId = req.params.sessionId;
+
+  const resp = global.folderResponses[sessionId];
+
+  console.log("📡 [BACKEND] GET folder_response:", sessionId, resp);
+
+  if (!resp) {
+    return res.json({});
+  }
+
+  return res.json(resp);
+});
+
+
+// ------------------------------------------------------------
 // INBOX (Pagina 6-7)
 // ------------------------------------------------------------
 router.get("/inbox/:user_id", async (req, res) => {
