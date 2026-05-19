@@ -14,25 +14,7 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
     console.log(`📡 [WS EVENT] Ricevuto: "${eventName}" con dati:`, JSON.stringify(args));
   });
 
-  // ⭐ HEARTBEAT SERVER-SIDE
-  socket.isAlive = true;
-
-  socket.on("pong", () => {
-  socket.isAlive = true;
-  });
-
-  // Ping ogni 15 secondi
-  const interval = setInterval(() => {
-    if (socket.isAlive === false) {
-    console.log("💀 [WS] Connessione terminata per mancato PONG");
-    return socket.disconnect(true);
-    }
-  socket.isAlive = false;
-  socket.emit("ping");
-}, 15000);
-
-  socket.on("close", () => clearInterval(interval));
-
+  
 
   // ------------------------------------------------------------
   // PRESENZA E REGISTRAZIONE
