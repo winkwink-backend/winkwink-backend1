@@ -1,5 +1,8 @@
 import { sendFCM } from "./firebase-config.js";
 
+// ⭐ Sessioni P2P attive (per proteggere i WebSocket durante WebRTC)
+const activeP2PSessions = new Map();
+
 export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms) => {
   // LOG DI TUTTI GLI EVENTI IN ARRIVO
   socket.onAny((eventName, ...args) => {
@@ -10,6 +13,26 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
   socket.onAny((eventName, ...args) => {
     console.log(`📡 [WS EVENT] Ricevuto: "${eventName}" con dati:`, JSON.stringify(args));
   });
+
+  // ⭐ HEARTBEAT SERVER-SIDE
+  socket.isAlive = true;
+
+  socket.on("pong", () => {
+  socket.isAlive = true;
+  });
+
+  // Ping ogni 15 secondi
+  const interval = setInterval(() => {
+    if (socket.isAlive === false) {
+    console.log("💀 [WS] Connessione terminata per mancato PONG");
+    return socket.disconnect(true);
+    }
+  socket.isAlive = false;
+  socket.emit("ping");
+}, 15000);
+
+  socket.on("close", () => clearInterval(interval));
+
 
   // ------------------------------------------------------------
   // PRESENZA E REGISTRAZIONE
@@ -24,16 +47,23 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
   });
 
   socket.on("disconnect", (reason) => {
-    console.log("📡 [WS] Disconnessione:", { socketId: socket.id, userId: socket.userId, reason });
+  console.log("📡 [WS] Disconnessione:", { socketId: socket.id, userId: socket.userId, reason });
 
-    if (socket.userId) {
-        onlineUsers.delete(socket.userId);
-        console.log("📡 [DEBUG] DELETE ESEGUITO → onlineUsers:", Array.from(onlineUsers.entries()));
-        io.emit("user_offline", { userId: socket.userId });
-    } else {
-        console.log("📡 [DEBUG] DISCONNECT SENZA USERID");
-    }
-  });
+  // ⭐ Protezione: NON disconnettere se l'utente è in una sessione P2P attiva
+  if (socket.userId && activeP2PSessions.has(socket.userId)) {
+    console.log("⚠️ [WS] Tentata disconnessione durante sessione P2P → IGNORATA");
+    return;
+  }
+
+  if (socket.userId) {
+    onlineUsers.delete(socket.userId);
+    console.log("📡 [DEBUG] DELETE ESEGUITO → onlineUsers:", Array.from(onlineUsers.entries()));
+    io.emit("user_offline", { userId: socket.userId });
+  } else {
+    console.log("📡 [DEBUG] DISCONNECT SENZA USERID");
+  }
+});
+
 
   // ------------------------------------------------------------
   // GESTIONE CHAT
@@ -96,9 +126,12 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
   });
 
   socket.on("ice_candidate", ({ toUserId, candidate }) => {
-    const target = onlineUsers.get(toUserId);
-    if (target) io.to(target).emit("ice_candidate", { from: socket.userId, candidate });
-  });
+  console.log("❄️ [ICE] da", socket.userId, "→", toUserId, candidate?.candidate);
+
+  const target = onlineUsers.get(toUserId);
+  if (target) io.to(target).emit("ice_candidate", { from: socket.userId, candidate });
+});
+
 
   // ------------------------------------------------------------
   // crea sessione
@@ -122,6 +155,10 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
         fileType,
         fileSize,
       });
+      // ⭐ Registra sessione P2P attiva
+      activeP2PSessions.set(fromUserId, sessionId);
+      activeP2PSessions.set(toUserId, sessionId);
+
 
       // 1️⃣ SALVA SUBITO LA SESSIONE (operazione atomica)
       await pool.query(
@@ -262,6 +299,8 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
         });
       }
     }
+    // ⭐ CHIUSURA SESSIONE P2P
+    endSession(sessionId);
   });
 
   // ------------------------------------------------------------
@@ -318,4 +357,12 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
       console.log("📡 Nessun token FCM per", toUserId);
     }
   });
+  function endSession(sessionId) {
+    for (const [uid, sid] of activeP2PSessions.entries()) {
+     if (sid === sessionId) {
+      activeP2PSessions.delete(uid);
+      console.log("🧹 [P2P] Sessione rimossa per utente:", uid);
+      }
+    }
+  }
 };
