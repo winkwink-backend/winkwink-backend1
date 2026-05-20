@@ -1,5 +1,4 @@
 console.log("📂 IL SERVER STA USANDO QUESTO FILE:", process.cwd());
-
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
@@ -11,7 +10,8 @@ import authRoutes from "./authRoutes.js";
 import p2pRoutes from "./p2pRoutes.js";
 import chatRoutes from "./chatRoutes.js";
 import { registerSocketHandlers } from "./socketHandlers.js";
-console.log("📍 IL FILE SOCKETHANDLERS È CARICATO DA QUI:", import.meta.url);
+
+console.log("📂 IL FILE SOCKETHANDLERS È CARICATO DA QUI:", import.meta.url);
 
 // 1️⃣ INIZIALIZZAZIONE DELL'APPLICAZIONE EXPRESS
 const app = express();
@@ -29,7 +29,6 @@ const io = new Server(httpServer, {
 });
 
 // 4️⃣ CONFIGURAZIONE DEL MIDDLEWARE GLOBALE
-// Fornisce l'istanza io e le mappe a tutte le richieste HTTP successive (es. in chatRoutes.js)
 app.use((req, res, next) => {
   req.io = io;
   req.onlineUsers = onlineUsers;
@@ -54,61 +53,56 @@ io.on("connection", (socket) => {
 // ⭐ HTTP: FILE ACCEPT (Gestione trasferimento quando l'app è in background/chiusa)
 // ------------------------------------------------------------
 app.post("/file_accept_http", async (req, res) => {
-    const { sessionId, userId } = req.body;
+  const { sessionId, userId } = req.body;
+  console.log("📂 [DEBUG] /file_accept_http ARRIVATO", { sessionId, userId });
 
-    console.log("🔥 [DEBUG] /file_accept_http ARRIVATO", { sessionId, userId });
-
-    // 1️⃣ Verifica l'esistenza e validità della sessione nel Database
+  try {
+    // 1️⃣ Verifica l'existence e validità della sessione nel Database
     const result = await pool.query(
-        "SELECT from_user_id FROM p2p_sessions WHERE session_id = $1",
-        [sessionId]
+      "SELECT from_user_id FROM p2p_sessions WHERE session_id = $1",
+      [sessionId]
     );
-
-    console.log("🔥 [DEBUG] RISULTATO QUERY SESSIONE:", result.rows);
-
+    console.log("📂 [DEBUG] RISULTATO QUERY SESSIONE:", result.rows);
     if (result.rows.length === 0) {
-        console.log("❌ [DEBUG] NESSUNA SESSIONE TROVATA");
-        return res.json({ ok: false });
+      console.log("❌ [DEBUG] NESSUNA SESSIONE TROVATA");
+      return res.json({ ok: false });
     }
 
     const toUserId = result.rows[0].from_user_id;
-
-    console.log("🔥 [DEBUG] MITTENTE (toUserId):", toUserId);
+    console.log("📂 [DEBUG] MITTENTE (toUserId):", toUserId);
 
     // 2️⃣ Verifica se il mittente originale è attualmente connesso al socket
     const target = onlineUsers.get(toUserId);
-
-    console.log("🔥 [DEBUG] SOCKET MITTENTE TROVATO?", {
-        toUserId,
-        target,
-        onlineUsers: Array.from(onlineUsers.entries())
+    console.log("📂 [DEBUG] SOCKET MITTENTE TROVATO?", {
+      toUserId,
+      target,
+      onlineUsers: Array.from(onlineUsers.entries())
     });
 
     if (target) {
-        console.log("🔥 [DEBUG] INVIO file_accept → socket:", target);
-
-        io.to(target).emit("file_accept", {
-            sessionId,
-            fromUserId: userId,
-        });
-
-        console.log("🔥 [DEBUG] INVIO open_download_page → socket:", target);
-
-        io.to(target).emit("open_download_page", {
-            sessionId,
-            fromUserId: userId,
-        });
-
-        console.log("📤 [WS] open_download_page → mittente", toUserId);
+      console.log("📂 [DEBUG] INVIO file_accept → socket:", target);
+      io.to(target).emit("file_accept", {
+        sessionId,
+        fromUserId: userId,
+      });
+      console.log("📂 [DEBUG] INVIO open_download_page → socket:", target);
+      io.to(target).emit("open_download_page", {
+        sessionId,
+        fromUserId: userId,
+      });
+      console.log("📂 [WS] open_download_page → mittente", toUserId);
     } else {
-        console.log("❌ [DEBUG] MITTENTE OFFLINE → NESSUN WS INVIATO");
+      console.log("❌ [DEBUG] MITTENTE OFFLINE → NESSUN WS INVIATO");
     }
-
-    res.json({ ok: true });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("❌ Errore in /file_accept_http:", err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // 7️⃣ AVVIO DEL SERVER SULLA PORTA ASSEGNATA
 const PORT = process.env.PORT || 10000;
 httpServer.listen(PORT, () => {
-  console.log(`🚀 Server + WebSocket pronti sulla porta ${PORT}`);
+  console.log(`📂 Server + WebSocket pronti sulla porta ${PORT}`);
 });
