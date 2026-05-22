@@ -1,34 +1,31 @@
 console.log("📂 IL SERVER STA USANDO QUESTO FILE:", process.cwd());
+
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 
-// Import Moduli
 import pool from "./db.js";
 import authRoutes from "./authRoutes.js";
-import p2pRoutes from "./p2pRoutes.js";
+import p2pRoutes from "./p2pRoutes.js";   // ⬅️ NUOVO FILE RISCRITTO
 import chatRoutes from "./chatRoutes.js";
 import { registerSocketHandlers } from "./socketHandlers.js";
 
 console.log("📂 IL FILE SOCKETHANDLERS È CARICATO DA QUI:", import.meta.url);
 
-// 1️⃣ INIZIALIZZAZIONE DELL'APPLICAZIONE EXPRESS
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 2️⃣ INIZIALIZZAZIONE DELLE MAPPE GLOBALI PER UTENTI E STANZE
 const onlineUsers = new Map();
 const chatRooms = new Map();
 
-// 3️⃣ CREAZIONE DEL SERVER HTTP E DI SOCKET.IO UTILIZZANDO L'ISTANZA EXPRESS APP
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: { origin: "*", methods: ["GET", "POST"] }
+  cors: { origin: "*", methods: ["GET", "POST"] },
 });
 
-// 4️⃣ CONFIGURAZIONE DEL MIDDLEWARE GLOBALE
+// middleware per condividere io / onlineUsers / chatRooms
 app.use((req, res, next) => {
   req.io = io;
   req.onlineUsers = onlineUsers;
@@ -36,72 +33,19 @@ app.use((req, res, next) => {
   next();
 });
 
-// 5️⃣ REGISTRAZIONE DELLE ROTTE DELLE FUNZIONALITÀ HTTP
+// rotte HTTP
 app.use(authRoutes);
-app.use(p2pRoutes);
+app.use(p2pRoutes);   // ⬅️ nuovo flusso file
 app.use(chatRoutes);
 
-// Rotta Radice per il controllo dello stato dell'istanza
+// healthcheck
 app.get("/", (req, res) => res.send("Backend WinkWink attivo e modulare"));
 
-// 6️⃣ REGISTRAZIONE DEI GESTORI EVENTI WEBSOCKET
+// socket (PRESENZA + CHAT + WEBRTC CHAT) — FILE TRANSFER RIMOSSO
 io.on("connection", (socket) => {
   registerSocketHandlers(io, socket, pool, onlineUsers, chatRooms);
 });
 
-// ------------------------------------------------------------
-// ⭐ HTTP: FILE ACCEPT (Gestione trasferimento quando l'app è in background/chiusa)
-// ------------------------------------------------------------
-app.post("/file_accept_http", async (req, res) => {
-  const { sessionId, userId } = req.body;
-  console.log("📂 [DEBUG] /file_accept_http ARRIVATO", { sessionId, userId });
-
-  try {
-    // 1️⃣ Verifica l'existence e validità della sessione nel Database
-    const result = await pool.query(
-      "SELECT from_user_id FROM p2p_sessions WHERE session_id = $1",
-      [sessionId]
-    );
-    console.log("📂 [DEBUG] RISULTATO QUERY SESSIONE:", result.rows);
-    if (result.rows.length === 0) {
-      console.log("❌ [DEBUG] NESSUNA SESSIONE TROVATA");
-      return res.json({ ok: false });
-    }
-
-    const toUserId = result.rows[0].from_user_id;
-    console.log("📂 [DEBUG] MITTENTE (toUserId):", toUserId);
-
-    // 2️⃣ Verifica se il mittente originale è attualmente connesso al socket
-    const target = onlineUsers.get(toUserId);
-    console.log("📂 [DEBUG] SOCKET MITTENTE TROVATO?", {
-      toUserId,
-      target,
-      onlineUsers: Array.from(onlineUsers.entries())
-    });
-
-    if (target) {
-      console.log("📂 [DEBUG] INVIO file_accept → socket:", target);
-      io.to(target).emit("file_accept", {
-        sessionId,
-        fromUserId: userId,
-      });
-      console.log("📂 [DEBUG] INVIO open_download_page → socket:", target);
-      io.to(target).emit("open_download_page", {
-        sessionId,
-        fromUserId: userId,
-      });
-      console.log("📂 [WS] open_download_page → mittente", toUserId);
-    } else {
-      console.log("❌ [DEBUG] MITTENTE OFFLINE → NESSUN WS INVIATO");
-    }
-    return res.json({ ok: true });
-  } catch (err) {
-    console.error("❌ Errore in /file_accept_http:", err.message);
-    return res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// 7️⃣ AVVIO DEL SERVER SULLA PORTA ASSEGNATA
 const PORT = process.env.PORT || 10000;
 httpServer.listen(PORT, () => {
   console.log(`📂 Server + WebSocket pronti sulla porta ${PORT}`);

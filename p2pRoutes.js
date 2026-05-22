@@ -4,147 +4,67 @@ import path from "path";
 import multer from "multer";
 import { fileURLToPath } from "url";
 import pool from "./db.js";
-import admin from "./firebase-config.js";
+import { sendFCM } from "./firebase-config.js";
+
+const router = express.Router();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const router = express.Router();
+const uploadDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
 
-// Configurazione dello storage per i file criptati temporanei (Nome file = sessionId)
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = path.join(__dirname, "uploads");
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${req.params.sessionId}.enc`);
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => cb(null, `${req.params.sessionId}`),
+});
+const upload = multer({ storage });
+
+async function getSession(sessionId) {
+  const result = await pool.query(
+    "SELECT * FROM p2p_sessions WHERE session_id = $1",
+    [sessionId]
+  );
+  return result.rows[0] || null;
+}
+
+async function updateSessionStatus(sessionId, status) {
+  await pool.query(
+    "UPDATE p2p_sessions SET status = $1, updated_at = NOW() WHERE session_id = $2",
+    [status, sessionId]
+  );
+}
+
+async function sendFcmToUser(userId, data) {
+  const res = await pool.query(
+    "SELECT fcm_token FROM users WHERE id = $1",
+    [userId]
+  );
+  const token = res.rows[0]?.fcm_token;
+  if (!token) {
+    console.log("⚠️ [FCM] Nessun token per utente", userId);
+    return;
   }
-});
-const upload = multer({ storage: storage });
+  await sendFCM({ token, data });
+}
 
-// ------------------------------------------------------------
-// ⭐ FOLDER RESPONSE (mittente ↔ ricevente)
-// ------------------------------------------------------------
-global.folderResponses = global.folderResponses || {};
-
-router.post("/p2p/session/folder_response", async (req, res) => {
-  const { sessionId, status, error } = req.body;
-  console.log("📂 [BACKEND] POST folder_response ARRIVATO:", req.body);
-  global.folderResponses[sessionId] = { status, error };
-  return res.json({ ok: true });
-});
-
-router.get("/p2p/session/folder_response/:sessionId", async (req, res) => {
-  const sessionId = req.params.sessionId;
-  const resp = global.folderResponses[sessionId];
-  console.log("📂 [BACKEND] GET folder_response:", sessionId, resp);
-  if (!resp) {
-    return res.json({});
-  }
-  return res.json(resp);
-});
-
-// ------------------------------------------------------------
-// ⭐ CHECK FOLDER (mittente → server)
-// ------------------------------------------------------------
-router.post("/p2p/session/check_folder", async (req, res) => {
-  const { sessionId, path } = req.body;
-  console.log("📂 [BACKEND] POST check_folder ARRIVATO:", req.body);
-  return res.json({ ok: true });
-});
-
-// ------------------------------------------------------------
-// ⭐ LATO MITTENTE: CARICAMENTO DEL FILE SUL PONTE
-// ------------------------------------------------------------
-router.post("/p2p/upload-ponte/:sessionId", upload.single("file"), (req, res) => {
-  try {
-    const sessionId = req.params.sessionId;
-    console.log(`📦 [SERVER PONTE] File criptato ricevuto per sessione: ${sessionId}`);
-    return res.status(200).json({ 
-      status: "ready_for_download",
-      sessionId: sessionId 
-    });
-  } catch (error) {
-    console.error("❌ Errore durante l'upload del file ponte:", error);
-    return res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-// ------------------------------------------------------------
-// ⭐ LATO RICEVENTE: SCARICAMENTO E DISTRUZIONE IMMEDIATA
-// ------------------------------------------------------------
-router.get("/p2p/download-ponte/:sessionId", (req, res) => {
-  const sessionId = req.params.sessionId;
-  const filePath = path.join(__dirname, "uploads", `${sessionId}.enc`);
-
-  if (!fs.existsSync(filePath)) {
-    console.log(`❌ [SERVER PONTE] Download fallito: file non trovato per sessione ${sessionId}`);
-    return res.status(404).send("File non trovato o gia' scaricato.");
-  }
-
-  console.log(`🛰️ [SERVER PONTE] Avvio streaming del file per sessione: ${sessionId}...`);
-
-  res.download(filePath, `${sessionId}.enc`, (err) => {
-    if (err) {
-      console.error(`❌ Errore durante lo streaming del file ${sessionId}:`, err);
-    } else {
-      console.log(`✅ [SERVER PONTE] Download ultimato con successo per sessione: ${sessionId}`);
-      
-      // Rimozione fisica istantanea dal disco rigido per garantire la totale privacy
-      fs.unlink(filePath, (unlinkErr) => {
-        if (unlinkErr) {
-          console.error(`❌ Errore cancellazione fisica del file temporaneo (${sessionId}.enc):`, unlinkErr);
-        } else {
-          console.log(`🗑️ [PRIVACY COMPLETED] File temporaneo ${sessionId}.enc eliminato definitivamente dal server.`);
-        }
-      });
-    }
-  });
-});
-
-// ------------------------------------------------------------
-// INBOX (Pagina 6-7)
-// ------------------------------------------------------------
-router.get("/inbox/:user_id", async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT * FROM inbox WHERE to_user_id = $1 ORDER BY created_at DESC",
-      [req.params.user_id]
-    );
-    return res.json({ inbox: result.rows });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-router.post("/inbox/create", async (req, res) => {
-  try {
-    const { to_user_id, from_user_id, type, payload } = req.body;
-    const result = await pool.query(
-      "INSERT INTO inbox (to_user_id, from_user_id, type, payload) VALUES ($1, $2, $3, $4) RETURNING *",
-      [to_user_id, from_user_id, type, payload]
-    );
-    return res.json({ entry: result.rows[0] });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// ------------------------------------------------------------
-// P2P SESSION (FILE TRANSFER) (Pagine 7-8-9)
-// ------------------------------------------------------------
+// 1) CREA SESSIONE
 router.post("/p2p/session/create", async (req, res) => {
   try {
     const { from_user_id, to_user_id, fileSize, fileType, fileName } = req.body;
+
+    if (!from_user_id || !to_user_id || !fileSize || !fileType) {
+      return res.status(400).json({ error: "Parametri mancanti" });
+    }
+
     const sessionId = String(Date.now());
 
     const result = await pool.query(
-      `INSERT INTO p2p_sessions (session_id, from_user_id, to_user_id, file_size, file_type, file_name)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO p2p_sessions
+       (session_id, from_user_id, to_user_id, file_size, file_type, file_name, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending')
        RETURNING *`,
       [sessionId, from_user_id, to_user_id, fileSize, fileType, fileName ?? ""]
     );
@@ -164,113 +84,191 @@ router.post("/p2p/session/create", async (req, res) => {
       ]
     );
 
-    const receiver = await pool.query(
-      "SELECT fcm_token FROM users WHERE id = $1",
-      [to_user_id]
+    const senderRes = await pool.query(
+      "SELECT name FROM users WHERE id = $1",
+      [from_user_id]
     );
-    const token = receiver.rows[0]?.fcm_token;
-    if (token) {
-      const sender = await pool.query(
-        "SELECT name FROM users WHERE id = $1",
-        [from_user_id]
-      );
-      const senderName = sender.rows[0]?.name ?? "";
+    const senderName = senderRes.rows[0]?.name ?? "";
 
-      const data = {
-        type: "incoming_file",
-        sessionId: String(sessionId),
-        fromUserId: String(from_user_id),
-        senderName: senderName,
-      };
-      if (fileName) data.fileName = String(fileName);
-      if (fileType) data.fileType = String(fileType);
-      if (fileSize) data.fileSize = String(fileSize);
+    const data = {
+      type: "incoming_file",
+      sessionId: String(sessionId),
+      fromUserId: String(from_user_id),
+      senderName,
+      fileName: fileName ? String(fileName) : "",
+      fileType: fileType ? String(fileType) : "",
+      fileSize: fileSize ? String(fileSize) : "0",
+    };
 
-      await admin.messaging().send({
-        token: token,
-        data,
-        android: { priority: "high" },
-      });
-      console.log(`📂 incoming_file via FCM → utente ${to_user_id}`);
-    }
+    await sendFcmToUser(to_user_id, data);
+
     return res.json({
-      delivered: token ? "fcm" : "none",
       session: result.rows[0],
+      delivered: "fcm",
       i18n_key: "file_transfer_waiting_accept",
     });
   } catch (err) {
+    console.error("❌ /p2p/session/create:", err.message);
     return res.status(500).json({ error: err.message });
   }
 });
 
+// 2) ACCETTAZIONE
+router.post("/p2p/session/accept", async (req, res) => {
+  try {
+    const { sessionId, userId } = req.body;
+
+    if (!sessionId || !userId) {
+      return res.status(400).json({ error: "Parametri mancanti" });
+    }
+
+    const session = await getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Sessione non trovata" });
+    }
+
+    if (String(session.to_user_id) !== String(userId)) {
+      return res.status(403).json({ error: "Non autorizzato" });
+    }
+
+    await updateSessionStatus(sessionId, "accepted");
+
+    const uploadUrl = `/p2p/session/upload/${sessionId}`;
+
+    return res.json({
+      status: "ok",
+      uploadUrl,
+    });
+  } catch (err) {
+    console.error("❌ /p2p/session/accept:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 3) UPLOAD FILE
+router.post(
+  "/p2p/session/upload/:sessionId",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+
+      const session = await getSession(sessionId);
+      if (!session) {
+        return res.status(404).json({ error: "Sessione non trovata" });
+      }
+
+      if (session.status !== "accepted") {
+        return res.status(400).json({ error: "Sessione non accettata" });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: "File mancante" });
+      }
+
+      await updateSessionStatus(sessionId, "uploaded");
+
+      const downloadUrl = `/p2p/session/download/${sessionId}`;
+
+      const data = {
+        type: "file_ready",
+        sessionId: String(sessionId),
+        fileName: session.file_name ?? "",
+        fileType: session.file_type ?? "",
+        fileSize: String(session.file_size ?? "0"),
+        downloadUrl,
+        fromUserId: String(session.from_user_id),
+      };
+
+      await sendFcmToUser(session.to_user_id, data);
+
+      return res.json({
+        status: "ready_for_download",
+        sessionId,
+        downloadUrl,
+      });
+    } catch (err) {
+      console.error("❌ /p2p/session/upload:", err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// 4) DOWNLOAD FILE
+router.get("/p2p/session/download/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const session = await getSession(sessionId);
+    if (!session) {
+      return res.status(404).send("Sessione non trovata");
+    }
+
+    const filePath = path.join(uploadDir, `${sessionId}`);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).send("File non trovato");
+    }
+
+    res.download(filePath, session.file_name || `winkwink_${sessionId}`, (err) => {
+      if (err) {
+        console.error("❌ Errore download:", err);
+      } else {
+        console.log("✅ Download completato per sessione", sessionId);
+      }
+    });
+  } catch (err) {
+    console.error("❌ /p2p/session/download:", err.message);
+    return res.status(500).send("Errore interno");
+  }
+});
+
+// 5) DOWNLOAD COMPLETATO + DELETE
+router.post("/p2p/session/downloadCompleted", async (req, res) => {
+  try {
+    const { sessionId, userId } = req.body;
+
+    if (!sessionId || !userId) {
+      return res.status(400).json({ error: "Parametri mancanti" });
+    }
+
+    const session = await getSession(sessionId);
+    if (!session) {
+      return res.status(404).json({ error: "Sessione non trovata" });
+    }
+
+    if (String(session.to_user_id) !== String(userId)) {
+      return res.status(403).json({ error: "Non autorizzato" });
+    }
+
+    await updateSessionStatus(sessionId, "completed");
+
+    const filePath = path.join(uploadDir, `${sessionId}`);
+    if (fs.existsSync(filePath)) {
+      fs.unlink(filePath, (err) => {
+        if (err) {
+          console.error("❌ Errore cancellazione file:", err);
+        } else {
+          console.log("🗑️ File temporaneo eliminato per sessione", sessionId);
+        }
+      });
+    }
+
+    return res.json({ status: "ok" });
+  } catch (err) {
+    console.error("❌ /p2p/session/downloadCompleted:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// opzionale: GET sessione
 router.get("/p2p/session/:sessionId", async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const result = await pool.query(
-      "SELECT * FROM p2p_sessions WHERE session_id = $1",
-      [sessionId]
-    );
-    if (result.rows.length === 0)
+    const session = await getSession(sessionId);
+    if (!session) {
       return res.status(404).json({ error: "Session not found" });
-    return res.json({ session: result.rows[0] });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// ------------------------------------------------------------
-// P2P CHAT WEBRTC SIGNALING (Pagine 10-11)
-// ------------------------------------------------------------
-router.post("/p2p/chat/offer", async (req, res) => {
-  try {
-    const { from_user_id, to_user_id, offer } = req.body;
-    await pool.query(
-      `INSERT INTO p2p_chat (user_a, user_b, offer) VALUES ($1, $2, $3)
-       ON CONFLICT (user_a, user_b)
-       DO UPDATE SET offer = EXCLUDED.offer, answer = NULL, candidates = '[]'::jsonb, updated_at = NOW()`,
-      [from_user_id, to_user_id, offer]
-    );
-    return res.json({ status: "ok" });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-router.get("/p2p/chat/offer", async (req, res) => {
-  try {
-    const { my_user_id, other_user_id } = req.query;
-    const result = await pool.query(
-      `SELECT offer FROM p2p_chat WHERE (user_a = $1 AND user_b = $2) OR (user_a = $2 AND user_b = $1)`,
-      [my_user_id, other_user_id]
-    );
-    return res.json({ offer: result.rows[0]?.offer || null });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-router.post("/p2p/chat/candidate", async (req, res) => {
-  try {
-    const { from_user_id, to_user_id, candidate } = req.body;
-    await pool.query(
-      `UPDATE p2p_chat SET candidates = candidates || $1::jsonb, updated_at = NOW()
-       WHERE (user_a = $2 AND user_b = $3) OR (user_a = $3 AND user_b = $2)`,
-      [JSON.stringify([candidate]), from_user_id, to_user_id]
-    );
-    return res.json({ status: "ok" });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-router.get("/p2p/chat/candidates", async (req, res) => {
-  try {
-    const { my_user_id, other_user_id } = req.query;
-    const result = await pool.query(
-      `SELECT candidates FROM p2p_chat WHERE (user_a = $1 AND user_b = $2) OR (user_a = $2 AND user_b = $1)`,
-      [my_user_id, other_user_id]
-    );
-    return res.json({ candidates: result.rows[0]?.candidates || [] });
+    }
+    return res.json({ session });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
