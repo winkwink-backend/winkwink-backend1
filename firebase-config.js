@@ -19,7 +19,7 @@ if (process.env.FIREBASE_CONFIG) {
  * 2. Se non esiste FIREBASE_CONFIG, usa il file locale
  * -----------------------------------------------------*/
 if (!serviceAccount) {
-  const localPath = "./winkwink-app-firebase-adminsdk-fbsvc-5001e4579b.json";
+  const localPath = "./winkwink-app-firebase-adminsdk-fbsvc-6453c68242.json";
 
   if (fs.existsSync(localPath)) {
     try {

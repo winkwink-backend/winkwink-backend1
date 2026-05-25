@@ -60,18 +60,28 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
   socket.on("send_message", async ({ chat_id, message }) => {
     try {
       const result = await pool.query(
-        `INSERT INTO chat_messages (chat_id, sender_id, content)
-         VALUES ($1, $2, $3) RETURNING *`,
-        [chat_id, message.sender_id, message.content]
-      );
+        `INSERT INTO chat_messages (chat_id, sender_id, receiver_id, content, type, status)
+         VALUES ($1, $2, $3, $4, $5, 'sent')
+         RETURNING *`,
+       [
+         chat_id,
+         message.sender_id,
+         message.receiver_id,
+         message.content,
+         message.type ?? "text"
+       ]
+     );
+
 
       const saved = result.rows[0];
 
       io.to(`chat_${chat_id}`).emit("new_message", {
         chat_id: parseInt(chat_id),
         sender_id: saved.sender_id,
+        receiver_id: saved.receiver_id,
         content: saved.content,
-        type: message.type ?? "text",
+        type: saved.type,
+        status: saved.status,
         created_at: saved.created_at,
       });
 
