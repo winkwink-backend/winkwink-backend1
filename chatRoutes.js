@@ -409,4 +409,18 @@ router.post("/contacts/sync", async (req, res) => {
   }
 });
 
+// 🗑️ CANCELLA TUTTI I MESSAGGI DI UNA CHAT
+router.delete("/chat/:chatId/clear", async (req, res) => {
+  const { chatId } = req.params;
+
+  try {
+    await pool.query("DELETE FROM chat_messages WHERE chat_id = $1", [chatId]);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("Errore cancellazione chat:", err);
+    return res.status(500).json({ success: false });
+  }
+});
+
+
 export default router;
