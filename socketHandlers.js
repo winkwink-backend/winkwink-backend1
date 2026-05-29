@@ -56,40 +56,49 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
     socket.leave(`chat_${chat_id}`);
     console.log(`↩️ Utente ${user_id} uscito dalla chat ${chat_id}`);
   });
-
-  socket.on("send_message", async ({ chat_id, message }) => {
-    try {
-      const result = await pool.query(
-        `INSERT INTO chat_messages (chat_id, sender_id, receiver_id, content, type, status)
-         VALUES ($1, $2, $3, $4, $5, 'sent')
-         RETURNING *`,
-       [
-         chat_id,
-         message.sender_id,
-         message.receiver_id,
-         message.content,
-         message.type ?? "text"
-       ]
-     );
-
-
-      const saved = result.rows[0];
-
-      io.to(`chat_${chat_id}`).emit("new_message", {
-        chat_id: parseInt(chat_id),
-        sender_id: saved.sender_id,
-        receiver_id: saved.receiver_id,
-        content: saved.content,
-        type: saved.type,
-        status: saved.status,
-        created_at: saved.created_at,
+socket.on("send_message", async (data) => {
+  try {
+    // ⭐ PATCH DELETE — PRIMA DI TUTTO
+    if (data.type === "delete") {
+      io.to(`chat_${data.chatId}`).emit("new_message", {
+        chat_id: data.chatId,
+        type: "delete",
+        id: data.id, // ⭐ ID del messaggio da cancellare
       });
-
-      console.log(`✅ Messaggio Realtime: Chat ${chat_id}`);
-    } catch (err) {
-      console.error("❌ ERRORE SQL SOCKET:", err.message);
+      return;
     }
-  });
+
+    // ⭐ MESSAGGIO NORMALE
+    const { chatId, senderId, receiverId, content, type } = data;
+
+    const result = await pool.query(
+      `INSERT INTO chat_messages (chat_id, sender_id, receiver_id, content, type, status)
+       VALUES ($1, $2, $3, $4, $5, 'sent')
+       RETURNING *`,
+      [chatId, senderId, receiverId, content, type ?? "text"]
+    );
+
+    const saved = result.rows[0];
+
+    // ⭐ INVIO MESSAGGIO A TUTTI NELLA CHAT
+    io.to(`chat_${chatId}`).emit("new_message", {
+      id: saved.id, // ⭐ ORA IL CLIENT RICEVE L’ID
+      chat_id: chatId,
+      sender_id: saved.sender_id,
+      receiver_id: saved.receiver_id,
+      content: saved.content,
+      type: saved.type,
+      status: saved.status,
+      created_at: saved.created_at,
+    });
+
+    console.log(`✅ Messaggio Realtime: Chat ${chatId}`);
+
+  } catch (err) {
+    console.error("❌ ERRORE SQL SOCKET:", err.message);
+  }
+});
+
 
   // ------------------------------------------------------------
   // SIGNALING WEBRTC (solo chat/video, non file)

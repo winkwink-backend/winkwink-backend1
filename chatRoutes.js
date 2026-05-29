@@ -2,6 +2,10 @@ import express from "express";
 import pool from "./db.js";
 import { sendFCM } from "./firebase-config.js";
 
+import fs from "fs";
+import path from "path";
+
+
 const router = express.Router();
 
 // ------------------------------------------------------------
@@ -120,6 +124,34 @@ router.delete("/delete-message/:id", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+router.delete("/message/:id/for-all", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `SELECT content, type FROM chat_messages WHERE id = $1`,
+      [id]
+    );
+
+    if (result.rows.length === 0)
+      return res.status(404).json({ error: "Message not found" });
+
+    const { content, type } = result.rows[0];
+
+    // Se è un file, rimuovilo dal filesystem
+    if (["image", "video", "file"].includes(type)) {
+      const filePath = path.join(process.cwd(), content);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+
+    await pool.query(`DELETE FROM chat_messages WHERE id = $1`, [id]);
+
+    return res.json({ status: "ok" });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 
 // ------------------------------------------------------------
 // CHAT — GESTIONE STANZE
@@ -287,6 +319,22 @@ router.get("/chat/messages/:chat_id", async (req, res) => {
 
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+router.delete("/message/:id/me/:userId", async (req, res) => {
+  try {
+    const { id, userId } = req.params;
+
+    await pool.query(
+      `UPDATE chat_messages
+       SET deleted_for = array_append(deleted_for, $1)
+       WHERE id = $2`,
+      [userId, id]
+    );
+
+    return res.json({ status: "ok" });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 });
 
