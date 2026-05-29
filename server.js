@@ -29,7 +29,21 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 
 // ⭐ Cartella uploads resa pubblica
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use(
+  "/uploads",
+  express.static(path.join(__dirname, "uploads"), {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith(".mp4")) {
+        res.setHeader("Content-Type", "video/mp4");
+        res.setHeader("Accept-Ranges", "bytes");
+      }
+      if (filePath.endsWith(".pdf")) {
+        res.setHeader("Content-Type", "application/pdf");
+      }
+    }
+  })
+);
+
 
 const onlineUsers = new Map();
 const chatRooms = new Map();
@@ -65,3 +79,17 @@ const PORT = process.env.PORT || 10000;
 httpServer.listen(PORT, () => {
   console.log(`🚀 Server + WebSocket pronti sulla porta ${PORT}`);
 });
+
+// 🧹 Pulizia automatica messaggi scaduti (ogni ora)
+setInterval(async () => {
+  try {
+    await pool.query(`
+      DELETE FROM chat_messages
+      WHERE created_at < NOW() - INTERVAL '72 hours'
+    `);
+    console.log("🧹 Pulizia messaggi scaduti completata");
+  } catch (err) {
+    console.error("❌ Errore pulizia messaggi:", err.message);
+  }
+}, 1000 * 60 * 60); // ogni ora
+
