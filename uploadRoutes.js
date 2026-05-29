@@ -34,7 +34,7 @@ const upload = multer({ storage });
 router.post("/upload", upload.single("file"), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "Nessun file ricevuto" });
 
-  const fileUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
+  const fileUrl = `https://${req.get("host")}/uploads/${req.file.filename}`;
 
   console.log("📥 File ricevuto:", req.file.filename);
   console.log("📤 URL generato:", fileUrl);
