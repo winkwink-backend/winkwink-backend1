@@ -315,6 +315,7 @@ router.get("/chat/messages/:chat_id", async (req, res) => {
          receiver_id,
          content,
          type,
+         file_name,  
          status,
          created_at
        FROM chat_messages
