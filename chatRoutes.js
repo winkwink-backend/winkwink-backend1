@@ -228,16 +228,17 @@ router.post("/chat/send", async (req, res) => {
       return res.status(400).json({ error: "Missing fields" });
 
     const result = await pool.query(
-      `INSERT INTO chat_messages (chat_id, sender_id, receiver_id, content, type, status)
-       VALUES ($1, $2, $3, $4, $5, 'sent')
-       RETURNING *`,
-      [
-        chat_id,
-        sender_id,
-        receiver_id,
-        content,
-        type ?? "text"
-      ]
+      `INSERT INTO chat_messages (chat_id, sender_id, receiver_id, content, type, file_name, status)
+      VALUES ($1, $2, $3, $4, $5, $6, 'sent')
+      RETURNING *`,
+     [
+       chat_id,
+       sender_id,
+       receiver_id,
+       content,
+       type ?? "text",
+       req.body.file_name ?? null   // ← nome originale
+     ]
     );
 
     const savedMessage = result.rows[0];
@@ -250,6 +251,7 @@ router.post("/chat/send", async (req, res) => {
         receiver_id: parseInt(receiver_id),
         content: savedMessage.content,
         type: savedMessage.type,
+        file_name: savedMessage.file_name,   // ← aggiunto
         status: savedMessage.status,
         created_at: savedMessage.created_at
       });
@@ -286,7 +288,13 @@ router.post("/chat/send", async (req, res) => {
       console.log("⚠️ [BACKEND FCM ERRORE]:", fcmErr.message);
     }
 
-    return res.json({ status: "ok", message: savedMessage });
+    return res.json({
+     status: "ok",
+     message: {
+       ...savedMessage,
+       file_name: savedMessage.file_name
+      }
+    });
 
   } catch (err) {
     console.error("❌ [BACKEND CRITICAL ERROR]:", err.message);
