@@ -1,6 +1,24 @@
+# Node dependencies
 node_modules/
+
+# Environment variables
 .env
+
+# Uploaded files (mai su GitHub)
 uploads/
+
+# File criptati generati dal sistema
 *.enc
-winkwink-app-firebase-adminsdk-fbsvc-6453c68242.json
+
+# Chiave privata Firebase Admin (MAI su GitHub)
+config/config.json
+
+# Log vari
+*.log
+
+# Cache e build
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
 

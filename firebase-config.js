@@ -19,7 +19,7 @@ if (process.env.FIREBASE_CONFIG) {
  * 2. Se non esiste FIREBASE_CONFIG, usa il file locale
  * -----------------------------------------------------*/
 if (!serviceAccount) {
-  const localPath = "./winkwink-app-firebase-adminsdk-fbsvc-6453c68242.json";
+  const localPath = "./config/config.json";
 
   if (fs.existsSync(localPath)) {
     try {
@@ -31,7 +31,7 @@ if (!serviceAccount) {
   } else {
     console.error("❌ ERRORE: File JSON Firebase non trovato!");
   }
-}
+}s
 
 /* -------------------------------------------------------
  * 3. Patch crittografica: corregge i \n della private key
