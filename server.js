@@ -13,7 +13,7 @@ import p2pRoutes from "./p2pRoutes.js";
 import chatRoutes from "./chatRoutes.js";
 import uploadRoutes from "./uploadRoutes.js";   // ⭐ NUOVO
 import { registerSocketHandlers } from "./socketHandlers.js";
-import "./firebase.js";
+import "./firebase-config.js"; 
 
 console.log("📍 IL FILE SOCKETHANDLERS È CARICATO DA QUI:", import.meta.url);
 
