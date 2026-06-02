@@ -19,7 +19,7 @@ if (process.env.FIREBASE_CONFIG) {
  * 2. Se non esiste FIREBASE_CONFIG, usa il file locale
  * -----------------------------------------------------*/
 if (!serviceAccount) {
-  const localPath = "./config/config.json";
+  const localPath = "./winkwink-app-firebase-adminsdk-fbsvc-dad5fdd635.json";
 
   if (fs.existsSync(localPath)) {
     try {
@@ -29,7 +29,7 @@ if (!serviceAccount) {
       console.error("❌ Firebase: Errore nel parsing del file locale:", err.message);
     }
   } else {
-    console.error("❌ ERRORE: File JSON Firebase non trovato!");
+    console.error("❌ ERRORE CRITICO: File JSON Firebase non trovato né in locale né nelle var d'ambiente!");
   }
 }
 
@@ -41,17 +41,21 @@ if (serviceAccount && serviceAccount.private_key) {
 }
 
 /* -------------------------------------------------------
- * 4. Inizializzazione Firebase Admin
+ * 4. Inizializzazione Firebase Admin (Migliorata)
  * -----------------------------------------------------*/
-if (serviceAccount && admin.apps.length === 0) {
-  try {
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
-    console.log("🚀 Firebase Admin SDK inizializzato correttamente con patch crittografica attiva");
-  } catch (err) {
-    console.error("❌ Errore durante admin.initializeApp:", err.message);
+if (serviceAccount) {
+  if (admin.apps.length === 0) {
+    try {
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+      console.log("🚀 Firebase Admin SDK inizializzato correttamente con patch crittografica attiva");
+    } catch (err) {
+      console.error("❌ Errore durante admin.initializeApp:", err.message);
+    }
   }
+} else {
+  console.error("⚠️ ATTENZIONE: Impossibile inizializzare Firebase. serviceAccount è NULLO.");
 }
 
 /* -------------------------------------------------------
@@ -59,6 +63,12 @@ if (serviceAccount && admin.apps.length === 0) {
  * -----------------------------------------------------*/
 export async function sendFCM({ token, data }) {
   console.log("📡 [DEBUG FCM] Richiesta invio notifiche in corso...");
+
+  // Controllo preventivo di sicurezza per evitare il crash
+  if (admin.apps.length === 0) {
+    console.error("❌ [DEBUG FCM] Abortito: Firebase non è stato inizializzato all'avvio!");
+    return;
+  }
 
   if (!token) {
     console.log("⚠️ [DEBUG FCM] Abortito: Token destinatario mancante");

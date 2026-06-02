@@ -7,13 +7,14 @@ import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 
+import "./firebase-config.js"; 
+
 import pool from "./db.js";
 import authRoutes from "./authRoutes.js";
 import p2pRoutes from "./p2pRoutes.js";
 import chatRoutes from "./chatRoutes.js";
-import uploadRoutes from "./uploadRoutes.js";   // ⭐ NUOVO
+import uploadRoutes from "./uploadRoutes.js";  
 import { registerSocketHandlers } from "./socketHandlers.js";
-import "./firebase-config.js"; 
 
 console.log("📍 IL FILE SOCKETHANDLERS È CARICATO DA QUI:", import.meta.url);
 
