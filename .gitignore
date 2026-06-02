@@ -11,7 +11,7 @@ uploads/
 *.enc
 
 # Chiave privata Firebase Admin (MAI su GitHub)
-winkwink-app-firebase-adminsdk-fbsvc-dad5fdd635.json
+winkwink-app-firebase-adminsdk-fbsvc-e9ffa6b19c.json
 
 # Log vari
 *.log

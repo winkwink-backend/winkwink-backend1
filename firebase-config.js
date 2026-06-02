@@ -1,5 +1,17 @@
 import admin from "firebase-admin";
 import fs from "fs";
+import path from "path"; // ⭐ AGGIUNTO PER PERCORSI ASSOLUTI DI DIAGNOSTICA
+import { fileURLToPath } from "url"; // ⭐ AGGIUNTO PER ES MODULES
+
+// Gestione sicura dei percorsi assoluti per ES Modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// 🔍 STAMPE DI DIAGNOSTICA INIZIALE (Cosa legge davvero Railway?)
+console.log("❓ [DIAGNOSTICA] La variabile FIREBASE_CONFIG esiste?", !!process.env.FIREBASE_CONFIG);
+if (process.env.FIREBASE_CONFIG) {
+  console.log("❓ [DIAGNOSTICA] Primi 20 caratteri della variabile:", process.env.FIREBASE_CONFIG.substring(0, 20));
+}
 
 let serviceAccount = null;
 
@@ -19,7 +31,8 @@ if (process.env.FIREBASE_CONFIG) {
  * 2. Se non esiste FIREBASE_CONFIG, usa il file locale
  * -----------------------------------------------------*/
 if (!serviceAccount) {
-  const localPath = "./winkwink-app-firebase-adminsdk-fbsvc-dad5fdd635.json";
+  // ⭐ PATCH SICUREZZA: Garantisce il funzionamento sia locale che dentro il container Docker di Railway
+  const localPath = path.resolve(__dirname, "./winkwink-app-firebase-adminsdk-fbsvc-e9ffa6b19c.json");
 
   if (fs.existsSync(localPath)) {
     try {
