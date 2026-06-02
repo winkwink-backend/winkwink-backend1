@@ -87,5 +87,5 @@ export async function sendFCM({ token, data }) {
     console.error("❌ [DEBUG FCM] Errore critico invio Google API:", err.message);
   }
 }
-import admin from "firebase-admin";
+
 export default admin;
