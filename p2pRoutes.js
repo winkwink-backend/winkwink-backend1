@@ -12,6 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const uploadDir = path.join(__dirname, "uploads");
+
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -20,6 +21,7 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => cb(null, `${req.params.sessionId}`),
 });
+
 const upload = multer({ storage });
 
 async function getSession(sessionId) {
@@ -43,10 +45,12 @@ async function sendFcmToUser(userId, data) {
     [userId]
   );
   const token = res.rows[0]?.fcm_token;
+
   if (!token) {
     console.log("⚠️ [FCM] Nessun token per utente", userId);
     return;
   }
+
   await sendFCM({ token, data });
 }
 
@@ -91,14 +95,15 @@ router.post("/p2p/session/create", async (req, res) => {
     const senderName = senderRes.rows[0]?.name ?? "";
 
     const data = {
-      type: "incoming_file",
-      sessionId: String(sessionId),
-      fromUserId: String(from_user_id),
-      senderName,
-      fileName: fileName ? String(fileName) : "",
-      fileType: fileType ? String(fileType) : "",
-      fileSize: fileSize ? String(fileSize) : "0",
-    };
+  type: "incoming_file",
+  sessionId: String(sessionId),
+  senderId: String(from_user_id),  
+  senderName,
+  fileName: fileName ? String(fileName) : "",
+  fileType: fileType ? String(fileType) : "",
+  fileSize: fileSize ? String(fileSize) : "0",
+};
+
 
     await sendFcmToUser(to_user_id, data);
 
@@ -123,6 +128,7 @@ router.post("/p2p/session/accept", async (req, res) => {
     }
 
     const session = await getSession(sessionId);
+
     if (!session) {
       return res.status(404).json({ error: "Sessione non trovata" });
     }
@@ -132,6 +138,38 @@ router.post("/p2p/session/accept", async (req, res) => {
     }
 
     await updateSessionStatus(sessionId, "accepted");
+
+    // 🔥 PATCH: avvisa il mittente via WebSocket che il ricevente ha accettato
+    const io = req.io;
+    const onlineUsers = req.onlineUsers;
+
+    if (io && onlineUsers) {
+      const senderSocketId = onlineUsers.get(String(session.from_user_id));
+
+      if (senderSocketId) {
+        io.to(senderSocketId).emit("file_accept", {
+          sessionId,
+          toUserId: String(userId),
+        });
+
+        console.log("📡 [FILE][HTTP] file_accept inoltrato via /p2p/session/accept", {
+          sessionId,
+          fromUserId: session.from_user_id,
+          toUserId: userId,
+        });
+      } else {
+        console.log(
+          "⚠️ [FILE][HTTP] Mittente offline in /p2p/session/accept",
+          {
+            sessionId,
+            fromUserId: session.from_user_id,
+            toUserId: userId,
+          }
+        );
+      }
+    } else {
+      console.log("⚠️ [FILE][HTTP] io o onlineUsers non disponibili in /p2p/session/accept");
+    }
 
     const uploadUrl = `/p2p/session/upload/${sessionId}`;
 
@@ -154,6 +192,7 @@ router.post(
       const { sessionId } = req.params;
 
       const session = await getSession(sessionId);
+
       if (!session) {
         return res.status(404).json({ error: "Sessione non trovata" });
       }
@@ -200,11 +239,13 @@ router.get("/p2p/session/download/:sessionId", async (req, res) => {
     const { sessionId } = req.params;
 
     const session = await getSession(sessionId);
+
     if (!session) {
       return res.status(404).send("Sessione non trovata");
     }
 
     const filePath = path.join(uploadDir, `${sessionId}`);
+
     if (!fs.existsSync(filePath)) {
       return res.status(404).send("File non trovato");
     }
@@ -232,6 +273,7 @@ router.post("/p2p/session/downloadCompleted", async (req, res) => {
     }
 
     const session = await getSession(sessionId);
+
     if (!session) {
       return res.status(404).json({ error: "Sessione non trovata" });
     }
@@ -243,6 +285,7 @@ router.post("/p2p/session/downloadCompleted", async (req, res) => {
     await updateSessionStatus(sessionId, "completed");
 
     const filePath = path.join(uploadDir, `${sessionId}`);
+
     if (fs.existsSync(filePath)) {
       fs.unlink(filePath, (err) => {
         if (err) {
@@ -265,9 +308,11 @@ router.get("/p2p/session/:sessionId", async (req, res) => {
   try {
     const { sessionId } = req.params;
     const session = await getSession(sessionId);
+
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
     }
+
     return res.json({ session });
   } catch (err) {
     return res.status(500).json({ error: err.message });
