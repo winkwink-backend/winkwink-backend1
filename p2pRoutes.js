@@ -95,14 +95,14 @@ router.post("/p2p/session/create", async (req, res) => {
     const senderName = senderRes.rows[0]?.name ?? "";
 
     const data = {
-  type: "incoming_file",
-  sessionId: String(sessionId),
-  senderId: String(from_user_id),  
-  senderName,
-  fileName: fileName ? String(fileName) : "",
-  fileType: fileType ? String(fileType) : "",
-  fileSize: fileSize ? String(fileSize) : "0",
-};
+     type: "incoming_file",
+     sessionId: String(sessionId),
+     senderId: String(from_user_id),  
+     senderName,
+     fileName: fileName ? String(fileName) : "",
+     fileType: fileType ? String(fileType) : "",
+     fileSize: fileSize ? String(fileSize) : "0",
+    };
 
 
     await sendFcmToUser(to_user_id, data);
