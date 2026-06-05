@@ -77,7 +77,6 @@ if (serviceAccount) {
 export async function sendFCM({ token, data }) {
   console.log("📡 [DEBUG FCM] Richiesta invio notifiche in corso...");
 
-  // Controllo preventivo di sicurezza per evitare il crash
   if (admin.apps.length === 0) {
     console.error("❌ [DEBUG FCM] Abortito: Firebase non è stato inizializzato all'avvio!");
     return;
@@ -88,11 +87,19 @@ export async function sendFCM({ token, data }) {
     return;
   }
 
+  // 🛠️ PATCH BACKEND: Forziamo la conversione di ogni singola chiave in una stringa pulita
+  const sanitizedData = {};
+  for (const key in data) {
+    if (data[key] !== undefined && data[key] !== null) {
+      sanitizedData[key] = String(data[key]);
+    }
+  }
+
   const message = {
     token: token,
-    data: data,
+    data: sanitizedData, // Usa la mappa sanificata
     android: {
-      priority: "high",
+      priority: "high", // Garantisce la consegna immediata anche a schermo spento
     },
     apns: {
       payload: {
@@ -110,5 +117,6 @@ export async function sendFCM({ token, data }) {
     console.error("❌ [DEBUG FCM] Errore critico invio Google API:", err.message);
   }
 }
+
 
 export default admin;
