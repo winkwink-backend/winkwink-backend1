@@ -121,30 +121,56 @@ router.post("/p2p/session/create", async (req, res) => {
 // 2) ACCETTAZIONE
 router.post("/p2p/session/accept", async (req, res) => {
   try {
+    console.log("📥 [ACCEPT][HTTP] Richiesta ricevuta:", req.body);
+
     const { sessionId, userId } = req.body;
 
     if (!sessionId || !userId) {
+      console.log("❌ [ACCEPT][HTTP] Parametri mancanti:", { sessionId, userId });
       return res.status(400).json({ error: "Parametri mancanti" });
     }
 
+    // Recupera sessione
     const session = await getSession(sessionId);
+    console.log("📄 [ACCEPT][HTTP] Sessione trovata:", session);
 
     if (!session) {
+      console.log("❌ [ACCEPT][HTTP] Sessione NON trovata:", sessionId);
       return res.status(404).json({ error: "Sessione non trovata" });
     }
 
+    // Controllo autorizzazione
+    console.log("🔍 [ACCEPT][HTTP] Confronto autorizzazione:", {
+      session_to_user_id: String(session.to_user_id),
+      userId_ricevuto: String(userId),
+    });
+
     if (String(session.to_user_id) !== String(userId)) {
+      console.log("⛔ [ACCEPT][HTTP] 403 NON AUTORIZZATO:", {
+        session_to_user_id: session.to_user_id,
+        userId_ricevuto: userId,
+      });
       return res.status(403).json({ error: "Non autorizzato" });
     }
 
+    // Aggiorna stato
     await updateSessionStatus(sessionId, "accepted");
+    console.log("✅ [ACCEPT][HTTP] Sessione aggiornata a 'accepted'");
 
-    // 🔥 PATCH: avvisa il mittente via WebSocket che il ricevente ha accettato
+    // Notifica via WebSocket
     const io = req.io;
     const onlineUsers = req.onlineUsers;
 
-    if (io && onlineUsers) {
+    if (!io || !onlineUsers) {
+      console.log("⚠️ [ACCEPT][HTTP] io o onlineUsers NON disponibili");
+    } else {
       const senderSocketId = onlineUsers.get(String(session.from_user_id));
+
+      console.log("📡 [ACCEPT][HTTP] Mittente onlineUsers.get:", {
+        from_user_id: session.from_user_id,
+        senderSocketId,
+        onlineUsers: Array.from(onlineUsers.entries()),
+      });
 
       if (senderSocketId) {
         io.to(senderSocketId).emit("file_accept", {
@@ -152,36 +178,34 @@ router.post("/p2p/session/accept", async (req, res) => {
           toUserId: String(userId),
         });
 
-        console.log("📡 [FILE][HTTP] file_accept inoltrato via /p2p/session/accept", {
+        console.log("📤 [ACCEPT][HTTP] file_accept INVIATO via WS:", {
           sessionId,
           fromUserId: session.from_user_id,
           toUserId: userId,
         });
       } else {
-        console.log(
-          "⚠️ [FILE][HTTP] Mittente offline in /p2p/session/accept",
-          {
-            sessionId,
-            fromUserId: session.from_user_id,
-            toUserId: userId,
-          }
-        );
+        console.log("⚠️ [ACCEPT][HTTP] Mittente OFFLINE, impossibile inviare WS:", {
+          sessionId,
+          fromUserId: session.from_user_id,
+          toUserId: userId,
+        });
       }
-    } else {
-      console.log("⚠️ [FILE][HTTP] io o onlineUsers non disponibili in /p2p/session/accept");
     }
 
     const uploadUrl = `/p2p/session/upload/${sessionId}`;
+    console.log("🔗 [ACCEPT][HTTP] Upload URL generato:", uploadUrl);
 
     return res.json({
       status: "ok",
       uploadUrl,
     });
+
   } catch (err) {
-    console.error("❌ /p2p/session/accept:", err.message);
+    console.error("❌ [ACCEPT][HTTP] Errore interno:", err);
     return res.status(500).json({ error: err.message });
   }
 });
+
 
 // 3) UPLOAD FILE
 router.post(

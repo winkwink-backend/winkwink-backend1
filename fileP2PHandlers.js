@@ -8,39 +8,40 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
   
   // 🛠️ PATCH 1: AGGANCIO SICURO DEL REGISTRO UTENTE SUL SOCKET
   socket.on("register", (data) => {
-    try {
-      console.log('📡 [WS EVENT] Ricevuto "register" globale in P2P Handler:', data);
-      
-      let targetUserId = null;
-      if (data && typeof data === "object") {
-        if (data.userId && typeof data.userId === "object") {
-          // Gestisce il caso nidificato del log client Flutter: { userId: { userId: 2 } }
-          targetUserId = data.userId.userId;
-        } else if (data.userId) {
-          targetUserId = data.userId;
-        }
-      } else {
-        targetUserId = data;
+  try {
+    console.log('📡 [WS SERVER GLOBAL] Ricevuto "register":', data);
+
+    let cleanUserId = null;
+    
+    // Estrae l'ID pulito sia se è un numero, sia se è un oggetto nidificato { userId: { userId: 1 } } o { userId: 1 }
+    if (data && typeof data === "object") {
+      if (data.userId && typeof data.userId === "object") {
+        cleanUserId = data.userId.userId;
+      } else if (data.userId) {
+        cleanUserId = data.userId;
       }
-
-      if (!targetUserId) {
-        console.log("⚠️ [WS P2P] Registrazione fallita: userId non valido");
-        return;
-      }
-
-      const userIdStr = String(targetUserId);
-      
-      // Sincronizza la mappa globale onlineUsers
-      onlineUsers.set(userIdStr, socket.id);
-      
-      // 🔒 IMPORTANTISSIMO: Salva l'userId direttamente dentro l'istanza del socket corrente!
-      socket.userId = userIdStr;
-
-      console.log(`✅ [WS P2P] Socket ${socket.id} associato stabilmente a userId: ${socket.userId}`);
-    } catch (err) {
-      console.error("❌ [WS P2P] Errore durante la registrazione socket:", err.message);
+    } else {
+      cleanUserId = data;
     }
-  });
+
+    if (!cleanUserId) {
+      console.log("⚠️ [WS] Id utente non valido durante la registrazione");
+      return;
+    }
+
+    // 🔒 FORZA IL SALVATAGGIO COME STRINGA PURA (es. "1" o "2")
+    const userIdStr = String(cleanUserId);
+    
+    // Salva nella mappa globale senza conservare gli oggetti JSON
+    onlineUsers.set(userIdStr, socket.id);
+    socket.userId = userIdStr; // Assicura la proprietà anche sul socket globale
+
+    console.log(`📡 [WS] Utente registrato correttamente come stringa: '${userIdStr}' -> Socket: ${socket.id}`);
+  } catch (err) {
+    console.error("❌ Errore nella registrazione globale del socket:", err.message);
+  }
+});
+
 
   const getTargetSocketId = (userId) => {
     if (!userId) return null;
