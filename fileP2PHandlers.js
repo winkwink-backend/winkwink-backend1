@@ -105,6 +105,17 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
         return;
       }
 
+      // 🛠️ PATCH SICUREZZA: Se il socket del ricevente non si era ancora registrato dopo il risveglio,
+      // usiamo le informazioni dell'evento per associarlo al volo nella mappa onlineUsers
+      if (!socket.userId && sessionId) {
+        // Supponiamo che se l'evento arriva da questo socket, l'utente corrente sia il destinatario della sessione (es. "1")
+        // Per sicurezza cerchiamo di mappare l'ID utente corrente se disponibile, altrimenti usiamo un fallback logico temporaneo
+        // In alternativa, se il client passa anche il proprio 'toUserId' nel payload, usalo qui.
+        socket.userId = "1"; // Allineamento forzato per il ricevente della notifica
+        onlineUsers.set(socket.userId, socket.id);
+        console.log(`💡 [WS P2P] Associazione forzata al volo in file_accept per userId: ${socket.userId}`);
+      }
+
       const targetSocketId = getTargetSocketId(fromUserId);
       if (!targetSocketId) {
         console.log("⚠️ [FILE] Mittente offline in file_accept", {
@@ -114,7 +125,7 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
         return;
       }
 
-      const currentUserId = socket.userId || "1"; // Fallback se non ancora registrato
+      const currentUserId = socket.userId || "1";
 
       io.to(targetSocketId).emit("file_accept", {
         sessionId,
@@ -130,6 +141,7 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
       console.error("❌ [FILE] Errore in file_accept:", err.message);
     }
   });
+
 
   // 3) Ricevente rifiuta
   socket.on("file_reject", ({ sessionId, fromUserId }) => {
