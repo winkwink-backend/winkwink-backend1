@@ -12,8 +12,6 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
     console.log('📡 [WS SERVER GLOBAL] Ricevuto "register":', data);
 
     let cleanUserId = null;
-    
-    // Estrae l'ID pulito sia se è un numero, sia se è un oggetto nidificato { userId: { userId: 1 } } o { userId: 1 }
     if (data && typeof data === "object") {
       if (data.userId && typeof data.userId === "object") {
         cleanUserId = data.userId.userId;
@@ -29,18 +27,28 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
       return;
     }
 
-    // 🔒 FORZA IL SALVATAGGIO COME STRINGA PURA (es. "1" o "2")
     const userIdStr = String(cleanUserId);
-    
-    // Salva nella mappa globale senza conservare gli oggetti JSON
-    onlineUsers.set(userIdStr, socket.id);
-    socket.userId = userIdStr; // Assicura la proprietà anche sul socket globale
 
-    console.log(`📡 [WS] Utente registrato correttamente come stringa: '${userIdStr}' -> Socket: ${socket.id}`);
+    // 🛠️ DETECTOR DI SOCKET FANTASMA: Pulisce la mappa da vecchi residui prima di inserire il nuovo
+    for (const [key, value] of onlineUsers.entries()) {
+      // Controlla sia se la chiave è una stringa uguale, sia se è un oggetto vecchio con lo stesso ID
+      if (key === userIdStr || (typeof key === "object" && String(key.userId) === userIdStr)) {
+        console.log(`🧹 [WS CLEANUP] Rimosso vecchio socket fantasma per userId ${userIdStr}: ${value}`);
+        onlineUsers.delete(key);
+      }
+    }
+
+    // Ora inserisce la nuova connessione pulita senza conflitti di duplicati
+    onlineUsers.set(userIdStr, socket.id);
+    socket.userId = userIdStr;
+
+    console.log(`📡 [WS] Nuova registrazione pulita: '${userIdStr}' -> Socket: ${socket.id}`);
+    console.log("📡 [DEBUG] Mappa onlineUsers aggiornata:", Array.from(onlineUsers.entries()));
   } catch (err) {
     console.error("❌ Errore nella registrazione globale del socket:", err.message);
   }
 });
+
 
 
   const getTargetSocketId = (userId) => {
