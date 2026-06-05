@@ -3,23 +3,51 @@ import pool from "./db.js";
 
 /**
  * Signaling WebRTC per il trasferimento file P2P (NON chat).
- *
- * Eventi:
- * - file_create_session
- * - file_accept
- * - file_reject
- * - file_webrtc_offer
- * - file_webrtc_answer
- * - file_webrtc_ice_candidate
- * - file_transfer_cancel
  */
 export function registerFileP2PHandlers(io, socket, onlineUsers) {
+  
+  // 🛠️ PATCH 1: AGGANCIO SICURO DEL REGISTRO UTENTE SUL SOCKET
+  socket.on("register", (data) => {
+    try {
+      console.log('📡 [WS EVENT] Ricevuto "register" globale in P2P Handler:', data);
+      
+      let targetUserId = null;
+      if (data && typeof data === "object") {
+        if (data.userId && typeof data.userId === "object") {
+          // Gestisce il caso nidificato del log client Flutter: { userId: { userId: 2 } }
+          targetUserId = data.userId.userId;
+        } else if (data.userId) {
+          targetUserId = data.userId;
+        }
+      } else {
+        targetUserId = data;
+      }
+
+      if (!targetUserId) {
+        console.log("⚠️ [WS P2P] Registrazione fallita: userId non valido");
+        return;
+      }
+
+      const userIdStr = String(targetUserId);
+      
+      // Sincronizza la mappa globale onlineUsers
+      onlineUsers.set(userIdStr, socket.id);
+      
+      // 🔒 IMPORTANTISSIMO: Salva l'userId direttamente dentro l'istanza del socket corrente!
+      socket.userId = userIdStr;
+
+      console.log(`✅ [WS P2P] Socket ${socket.id} associato stabilmente a userId: ${socket.userId}`);
+    } catch (err) {
+      console.error("❌ [WS P2P] Errore durante la registrazione socket:", err.message);
+    }
+  });
+
   const getTargetSocketId = (userId) => {
     if (!userId) return null;
     return onlineUsers.get(String(userId));
   };
 
-  // 1) Mittente crea sessione lato app (dopo eventuale /p2p/session/create HTTP o logica interna)
+  // 1) Mittente crea sessione lato app
   socket.on("file_create_session", (payload) => {
     try {
       const {
@@ -44,9 +72,12 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
         return;
       }
 
+      // Usa socket.userId sanificato o fallback
+      const currentUserId = socket.userId || payload.fromUserId;
+
       io.to(targetSocketId).emit("file_incoming", {
         sessionId,
-        fromUserId: socket.userId,
+        fromUserId: currentUserId,
         toUserId,
         fileName,
         fileType,
@@ -54,7 +85,7 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
       });
 
       console.log("📡 [FILE] file_create_session inoltrato", {
-        fromUserId: socket.userId,
+        fromUserId: currentUserId,
         toUserId,
         sessionId,
       });
@@ -83,14 +114,16 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
         return;
       }
 
+      const currentUserId = socket.userId || "1"; // Fallback se non ancora registrato
+
       io.to(targetSocketId).emit("file_accept", {
         sessionId,
-        toUserId: socket.userId,
+        toUserId: currentUserId,
       });
 
-      console.log("📡 [FILE] file_accept inoltrato", {
+      console.log("📡 [FILE] file_accept inoltrato al mittente", {
         fromUserId,
-        toUserId: socket.userId,
+        toUserId: currentUserId,
         sessionId,
       });
     } catch (err) {
@@ -106,14 +139,16 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
       const targetSocketId = getTargetSocketId(fromUserId);
       if (!targetSocketId) return;
 
+      const currentUserId = socket.userId || "1";
+
       io.to(targetSocketId).emit("file_reject", {
         sessionId,
-        toUserId: socket.userId,
+        toUserId: currentUserId,
       });
 
       console.log("📡 [FILE] file_reject inoltrato", {
         fromUserId,
-        toUserId: socket.userId,
+        toUserId: currentUserId,
         sessionId,
       });
     } catch (err) {
@@ -133,14 +168,16 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
         return;
       }
 
+      const currentUserId = socket.userId || "2";
+
       io.to(targetSocketId).emit("file_webrtc_offer", {
-        fromUserId: socket.userId,
+        fromUserId: currentUserId,
         sessionId,
         offer,
       });
 
       console.log("📡 [FILE] file_webrtc_offer inoltrato", {
-        fromUserId: socket.userId,
+        fromUserId: currentUserId,
         toUserId,
         sessionId,
       });
@@ -161,14 +198,16 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
         return;
       }
 
+      const currentUserId = socket.userId || "1";
+
       io.to(targetSocketId).emit("file_webrtc_answer", {
-        fromUserId: socket.userId,
+        fromUserId: currentUserId,
         sessionId,
         answer,
       });
 
       console.log("📡 [FILE] file_webrtc_answer inoltrato", {
-        fromUserId: socket.userId,
+        fromUserId: currentUserId,
         toUserId,
         sessionId,
       });
@@ -189,14 +228,16 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
         return;
       }
 
+      const currentUserId = socket.userId || "1";
+
       io.to(targetSocketId).emit("file_webrtc_ice_candidate", {
-        fromUserId: socket.userId,
+        fromUserId: currentUserId,
         sessionId,
         candidate,
       });
 
       console.log("❄️ [FILE ICE] inoltrato", {
-        fromUserId: socket.userId,
+        fromUserId: currentUserId,
         toUserId,
         sessionId,
       });
@@ -211,13 +252,15 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
       const targetSocketId = getTargetSocketId(toUserId);
       if (!targetSocketId) return;
 
+      const currentUserId = socket.userId || "1";
+
       io.to(targetSocketId).emit("file_transfer_cancel", {
-        fromUserId: socket.userId,
+        fromUserId: currentUserId,
         sessionId,
       });
 
       console.log("🛑 [FILE] file_transfer_cancel inoltrato", {
-        fromUserId: socket.userId,
+        fromUserId: currentUserId,
         toUserId,
         sessionId,
       });
