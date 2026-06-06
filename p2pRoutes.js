@@ -123,7 +123,9 @@ router.post("/p2p/session/accept", async (req, res) => {
   try {
     console.log("📥 [ACCEPT][HTTP] Richiesta ricevuta:", req.body);
 
-    const { sessionId, userId } = req.body;
+    // ⭐ CORREZIONE PARAMETRI: Accetta sia le chiavi minuscole (Nativo) che CamelCase (Flutter)
+    const sessionId = req.body.sessionId || req.body.sessionid;
+    const userId = req.body.userId || req.body.userid;
 
     if (!sessionId || !userId) {
       console.log("❌ [ACCEPT][HTTP] Parametri mancanti:", { sessionId, userId });
@@ -136,7 +138,7 @@ router.post("/p2p/session/accept", async (req, res) => {
 
     if (!session) {
       console.log("❌ [ACCEPT][HTTP] Sessione NON trovata:", sessionId);
-      return res.status(404).json({ error: "Sessione non trovata" });
+      return res.status(404).json({ error: "Sessione non trouvata" });
     }
 
     // Controllo autorizzazione
@@ -173,9 +175,11 @@ router.post("/p2p/session/accept", async (req, res) => {
       });
 
       if (senderSocketId) {
+        // ⭐ NOTA SINCRO FLUTTER: Inviamo toUserId in modo che combaci con il parser del mittente
         io.to(senderSocketId).emit("file_accept", {
           sessionId,
           toUserId: String(userId),
+          fromUserId: String(userId) // Aggiunto per massima compatibilità con i tuoi filtri Dart
         });
 
         console.log("📤 [ACCEPT][HTTP] file_accept INVIATO via WS:", {
@@ -205,6 +209,7 @@ router.post("/p2p/session/accept", async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 });
+
 
 
 // 3) UPLOAD FILE
