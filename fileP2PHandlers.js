@@ -177,16 +177,15 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
   });
 
   // 4) WebRTC OFFER (DataChannel per file)
-   // ⭐ Cerca questo punto nel codice dei tuoi WebSocket sul server
-socket.on("file_webrtc_offer", (data) => {
-  try {
-    const toUserId = data.toUserId || data.touserid;
-    const sessionId = data.sessionId || data.sessionid;
-    const offer = data.offer;
+  socket.on("file_webrtc_offer", (data) => {
+   try {
+     const toUserId = data.toUserId || data.touserid;
+     const sessionId = data.sessionId || data.sessionid;
+     const offer = data.offer;
 
-    const targetSocketId = getTargetSocketId(toUserId);
+     const targetSocketId = getTargetSocketId(toUserId);
     
-    if (!targetSocketId) {
+     if (!targetSocketId) {
       // 1. Questo è il log che vedi adesso:
       console.log("⚠️ [FILE] Destinatario offline in file_webrtc_offer. Attivo Fallback HTTP.", {
         toUserId,
@@ -202,7 +201,6 @@ socket.on("file_webrtc_offer", (data) => {
       console.log(`📡 [FALLBACK] Segnale 'fallback_to_http' inviato al mittente per sessione: ${sessionId}`);
       return; 
     }
-
 
   // 5) WebRTC ANSWER
   socket.on("file_webrtc_answer", ({ toUserId, sessionId, answer }) => {
