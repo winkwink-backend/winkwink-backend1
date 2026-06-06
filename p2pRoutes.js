@@ -5,6 +5,7 @@ import multer from "multer";
 import { fileURLToPath } from "url";
 import pool from "./db.js";
 import { sendFCM } from "./firebase-config.js";
+import { PassThrough } from "stream";
 
 const router = express.Router();
 
@@ -211,95 +212,14 @@ router.post("/p2p/session/accept", async (req, res) => {
 });
 
 
-
-// 3) UPLOAD FILE
-router.post(
-  "/p2p/session/upload/:sessionId",
-  upload.single("file"),
-  async (req, res) => {
-    try {
-      const { sessionId } = req.params;
-
-      const session = await getSession(sessionId);
-
-      if (!session) {
-        return res.status(404).json({ error: "Sessione non trovata" });
-      }
-
-      if (session.status !== "accepted") {
-        return res.status(400).json({ error: "Sessione non accettata" });
-      }
-
-      if (!req.file) {
-        return res.status(400).json({ error: "File mancante" });
-      }
-
-      await updateSessionStatus(sessionId, "uploaded");
-
-      const downloadUrl = `/p2p/session/download/${sessionId}`;
-
-      const data = {
-        type: "file_ready",
-        sessionId: String(sessionId),
-        fileName: session.file_name ?? "",
-        fileType: session.file_type ?? "",
-        fileSize: String(session.file_size ?? "0"),
-        downloadUrl,
-        fromUserId: String(session.from_user_id),
-      };
-
-      await sendFcmToUser(session.to_user_id, data);
-
-      return res.json({
-        status: "ready_for_download",
-        sessionId,
-        downloadUrl,
-      });
-    } catch (err) {
-      console.error("❌ /p2p/session/upload:", err.message);
-      return res.status(500).json({ error: err.message });
-    }
-  }
-);
-
-// 4) DOWNLOAD FILE
-router.get("/p2p/session/download/:sessionId", async (req, res) => {
+// ============================================================
+// 3) UPLOAD FILE IN STREAMING (PIPE CONCORRENTE)
+// ============================================================
+// ⭐ NOTA: Abbiamo rimosso 'upload.single("file")' perché leggiamo i byte direttamente dalla richiesta HTTP raw
+router.post("/p2p/session/upload/:sessionId", async (req, res) => {
   try {
     const { sessionId } = req.params;
-
-    const session = await getSession(sessionId);
-
-    if (!session) {
-      return res.status(404).send("Sessione non trovata");
-    }
-
-    const filePath = path.join(uploadDir, `${sessionId}`);
-
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).send("File non trovato");
-    }
-
-    res.download(filePath, session.file_name || `winkwink_${sessionId}`, (err) => {
-      if (err) {
-        console.error("❌ Errore download:", err);
-      } else {
-        console.log("✅ Download completato per sessione", sessionId);
-      }
-    });
-  } catch (err) {
-    console.error("❌ /p2p/session/download:", err.message);
-    return res.status(500).send("Errore interno");
-  }
-});
-
-// 5) DOWNLOAD COMPLETATO + DELETE
-router.post("/p2p/session/downloadCompleted", async (req, res) => {
-  try {
-    const { sessionId, userId } = req.body;
-
-    if (!sessionId || !userId) {
-      return res.status(400).json({ error: "Parametri mancanti" });
-    }
+    console.log(`📥 [UPLOAD][HTTP] Ricezione byte in streaming per sessione: ${sessionId}`);
 
     const session = await getSession(sessionId);
 
@@ -307,32 +227,90 @@ router.post("/p2p/session/downloadCompleted", async (req, res) => {
       return res.status(404).json({ error: "Sessione non trovata" });
     }
 
-    if (String(session.to_user_id) !== String(userId)) {
-      return res.status(403).json({ error: "Non autorizzato" });
+    if (session.status !== "accepted") {
+      return res.status(400).json({ error: "Sessione non accettata" });
     }
 
-    await updateSessionStatus(sessionId, "completed");
+    // Creiamo il tunnel PassThrough in memoria per questa specifica sessione
+    const tunnel = new PassThrough();
+    activeStreams.set(sessionId, tunnel);
 
-    const filePath = path.join(uploadDir, `${sessionId}`);
+    // Convogliamo i byte in arrivo dal mittente Dart dentro il nostro tunnel di memoria
+    req.pipe(tunnel);
 
-    if (fs.existsSync(filePath)) {
-      fs.unlink(filePath, (err) => {
-        if (err) {
-          console.error("❌ Errore cancellazione file:", err);
-        } else {
-          console.log("🗑️ File temporaneo eliminato per sessione", sessionId);
-        }
+    await updateSessionStatus(sessionId, "uploaded");
+
+    req.on('end', () => {
+      console.log(`✅ [UPLOAD][HTTP] Il mittente ha terminato l'invio dei byte per: ${sessionId}`);
+    });
+
+    // Rispondiamo al mittente solo quando lo stream si chiude (segno che il ricevente ha preso tutto)
+    tunnel.on('end', () => {
+      console.log(`🧹 [UPLOAD][HTTP] Trasferimento chiuso. Rimuovo lo stream della sessione: ${sessionId}`);
+      activeStreams.delete(sessionId);
+      return res.json({
+        status: "ready_for_download",
+        sessionId
       });
-    }
+    });
 
-    return res.json({ status: "ok" });
   } catch (err) {
-    console.error("❌ /p2p/session/downloadCompleted:", err.message);
+    console.error("❌ /p2p/session/upload:", err.message);
+    activeStreams.delete(req.params.sessionId);
     return res.status(500).json({ error: err.message });
   }
 });
 
-// opzionale: GET sessione
+// ============================================================
+// 4) DOWNLOAD FILE IN STREAMING (PIPE CONCORRENTE)
+// ============================================================
+router.get("/p2p/session/download/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    console.log(`📤 [DOWNLOAD][HTTP] Il ricevente richiede l'aggancio alla sessione: ${sessionId}`);
+
+    const session = await getSession(sessionId);
+
+    if (!session) {
+      return res.status(404).send("Sessione non trovata");
+    }
+
+    // Recuperiamo il tunnel in memoria in cui il mittente sta iniettando i byte
+    const tunnel = activeStreams.get(sessionId);
+
+    if (!tunnel) {
+      console.log(`❌ [DOWNLOAD][HTTP] Stream in tempo reale non trovato o scaduto per: ${sessionId}`);
+      return res.status(404).send("File in streaming non disponibile o scaduto");
+    }
+
+    // ⭐ CONFIGURAZIONE HEADER: Guida il DownloadManager nativo di Android
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${session.file_name || 'winkwink_file'}"`);
+    // Passiamo la dimensione reale del file memorizzata nel DB per far mostrare ad Android la percentuale esatta
+    res.setHeader('Content-Length', String(session.file_size));
+
+    // Spingiamo i byte del tunnel direttamente dentro la risposta HTTP del DownloadManager di Android
+    tunnel.pipe(res);
+
+    res.on('finish', async () => {
+      console.log(`✅ [DOWNLOAD][HTTP] Download completato con successo dal ricevente per: ${sessionId}`);
+      
+      // Aggiorna lo stato nel database
+      await updateSessionStatus(sessionId, "completed");
+      
+      // Rimuove lo stream dalla RAM liberandola istantaneamente
+      activeStreams.delete(sessionId);
+    });
+
+  } catch (err) {
+    console.error("❌ /p2p/session/download:", err.message);
+    return res.status(500).send("Errore interno di download");
+  }
+});
+
+// ============================================================
+// 5) GET SESSIONE OPZIONALE
+// ============================================================
 router.get("/p2p/session/:sessionId", async (req, res) => {
   try {
     const { sessionId } = req.params;

@@ -177,34 +177,32 @@ export function registerFileP2PHandlers(io, socket, onlineUsers) {
   });
 
   // 4) WebRTC OFFER (DataChannel per file)
-  socket.on("file_webrtc_offer", ({ toUserId, sessionId, offer }) => {
-    try {
-      const targetSocketId = getTargetSocketId(toUserId);
-      if (!targetSocketId) {
-        console.log("⚠️ [FILE] Destinatario offline in file_webrtc_offer", {
-          toUserId,
-          sessionId,
-        });
-        return;
-      }
+   // ⭐ Cerca questo punto nel codice dei tuoi WebSocket sul server
+socket.on("file_webrtc_offer", (data) => {
+  try {
+    const toUserId = data.toUserId || data.touserid;
+    const sessionId = data.sessionId || data.sessionid;
+    const offer = data.offer;
 
-      const currentUserId = socket.userId || "2";
-
-      io.to(targetSocketId).emit("file_webrtc_offer", {
-        fromUserId: currentUserId,
-        sessionId,
-        offer,
-      });
-
-      console.log("📡 [FILE] file_webrtc_offer inoltrato", {
-        fromUserId: currentUserId,
+    const targetSocketId = getTargetSocketId(toUserId);
+    
+    if (!targetSocketId) {
+      // 1. Questo è il log che vedi adesso:
+      console.log("⚠️ [FILE] Destinatario offline in file_webrtc_offer. Attivo Fallback HTTP.", {
         toUserId,
         sessionId,
       });
-    } catch (err) {
-      console.error("❌ [FILE] Errore in file_webrtc_offer:", err.message);
+
+      // 2. ⭐ AGGIUNGI QUESTA RIGA: Spedisce il comando di fallback al mittente Dart
+      socket.emit("fallback_to_http", {
+        sessionId: sessionId,
+        uploadUrl: `/p2p/session/upload/${sessionId}`
+      });
+
+      console.log(`📡 [FALLBACK] Segnale 'fallback_to_http' inviato al mittente per sessione: ${sessionId}`);
+      return; 
     }
-  });
+
 
   // 5) WebRTC ANSWER
   socket.on("file_webrtc_answer", ({ toUserId, sessionId, answer }) => {
