@@ -178,10 +178,10 @@ router.post("/p2p/session/accept", async (req, res) => {
 
       if (senderSocketId) {
         // ⭐ NOTA SINCRO FLUTTER: Inviamo toUserId in modo che combaci con il parser del mittente
-        io.to(senderSocketId).emit("file_accept", {
-          sessionId,
-          toUserId: String(userId),
-          fromUserId: String(userId) // Aggiunto per massima compatibilità con i tuoi filtri Dart
+        io.to(senderSocketId).emit('file_accept', {
+            sessionId: session.session_id,
+            fromUserId: session.to_user_id,   // Chi ha accettato (User 1)
+            toUserId: session.from_user_id    // Il destinatario reale del pacchetto (User 2)
         });
 
         console.log("📤 [ACCEPT][HTTP] file_accept INVIATO via WS:", {
