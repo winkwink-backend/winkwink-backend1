@@ -2,280 +2,181 @@
 import pool from "./db.js";
 
 /**
- * Signaling WebRTC per il trasferimento file P2P (NON chat).
+ * Gestione WebRTC P2P per trasferimento file diretto (app aperte).
+ * Totalmente separato dal flusso HTTP.
  */
+
 export function registerFileP2PHandlers(io, socket, onlineUsers) {
-
-  // -----------------------------
-  // REGISTRAZIONE SOCKET UTENTE
-  // -----------------------------
-  socket.on("register", (data) => {
-    try {
-      console.log('📡 [WS SERVER GLOBAL] Ricevuto "register":', data);
-
-      let cleanUserId = null;
-      if (data && typeof data === "object") {
-        if (data.userId && typeof data.userId === "object") {
-          cleanUserId = data.userId.userId;
-        } else if (data.userId) {
-          cleanUserId = data.userId;
-        }
-      } else {
-        cleanUserId = data;
-      }
-
-      if (!cleanUserId) {
-        console.log("⚠️ [WS] Id utente non valido durante la registrazione");
-        return;
-      }
-
-      const userIdStr = String(cleanUserId);
-
-      // Rimuove eventuali socket fantasma
-      for (const [key, value] of onlineUsers.entries()) {
-        if (key === userIdStr || (typeof key === "object" && String(key.userId) === userIdStr)) {
-          console.log(`🧹 [WS CLEANUP] Rimosso vecchio socket fantasma per userId ${userIdStr}: ${value}`);
-          onlineUsers.delete(key);
-        }
-      }
-
-      onlineUsers.set(userIdStr, socket.id);
-      socket.userId = userIdStr;
-
-      console.log(`📡 [WS] Nuova registrazione pulita: '${userIdStr}' -> Socket: ${socket.id}`);
-      console.log("📡 [DEBUG] Mappa onlineUsers aggiornata:", Array.from(onlineUsers.entries()));
-    } catch (err) {
-      console.error("❌ Errore nella registrazione globale del socket:", err.message);
-    }
-  });
-
-  const getTargetSocketId = (userId) => {
+  /* ---------------------------------------------------------
+     UTILS
+  --------------------------------------------------------- */
+  const getSocketId = (userId) => {
     if (!userId) return null;
     return onlineUsers.get(String(userId));
   };
 
-  // -----------------------------
-  // 1) CREAZIONE SESSIONE FILE
-  // -----------------------------
-  socket.on("file_create_session", (payload) => {
+  /* ---------------------------------------------------------
+     0) REGISTRAZIONE SOCKET (solo per P2P)
+  --------------------------------------------------------- */
+  socket.on("register_p2p", (payload) => {
     try {
-      const { sessionId, toUserId, fileName, fileType, fileSize } = payload || {};
+      const userId = String(payload?.userId ?? payload);
+      if (!userId) return;
 
-      if (!sessionId || !toUserId) {
-        console.log("❌ [FILE] file_create_session: parametri mancanti", payload);
+      // Rimuove eventuali socket fantasma
+      for (const [key, value] of onlineUsers.entries()) {
+        if (String(key) === userId) {
+          onlineUsers.delete(key);
+        }
+      }
+
+      onlineUsers.set(userId, socket.id);
+      socket.userId = userId;
+
+      console.log(`📡 [P2P] Registrato userId=${userId} socket=${socket.id}`);
+    } catch (err) {
+      console.error("❌ [P2P] Errore in register_p2p:", err.message);
+    }
+  });
+
+  /* ---------------------------------------------------------
+     1) CREAZIONE SESSIONE P2P (mittente → ricevente)
+  --------------------------------------------------------- */
+  socket.on("p2p_create_session", (data) => {
+    try {
+      const { sessionId, toUserId, fileName, fileType, fileSize } = data;
+      const target = getSocketId(toUserId);
+
+      if (!target) {
+        console.log("⚠️ [P2P] Destinatario offline → fallback HTTP");
+        socket.emit("p2p_fallback_http", { sessionId });
         return;
       }
 
-      const targetSocketId = getTargetSocketId(toUserId);
-      if (!targetSocketId) {
-        console.log("⚠️ [FILE] Destinatario offline per file_create_session", { toUserId, sessionId });
-        return;
-      }
-
-      const currentUserId = socket.userId || payload.fromUserId;
-
-      io.to(targetSocketId).emit("file_incoming", {
+      io.to(target).emit("p2p_incoming", {
         sessionId,
-        fromUserId: currentUserId,
+        fromUserId: socket.userId,
         toUserId,
         fileName,
         fileType,
         fileSize,
       });
 
-      console.log("📡 [FILE] file_create_session inoltrato", {
-        fromUserId: currentUserId,
-        toUserId,
-        sessionId,
-      });
+      console.log("📡 [P2P] p2p_create_session inoltrato");
     } catch (err) {
-      console.error("❌ [FILE] Errore in file_create_session:", err.message);
+      console.error("❌ [P2P] Errore in p2p_create_session:", err.message);
     }
   });
 
-  // -----------------------------
-  // 2) ACCETTAZIONE FILE
-  // -----------------------------
-  socket.on("file_accept", ({ sessionId, fromUserId }) => {
+  /* ---------------------------------------------------------
+     2) ACCETTAZIONE
+  --------------------------------------------------------- */
+  socket.on("p2p_accept", ({ sessionId, fromUserId }) => {
     try {
-      if (!sessionId || !fromUserId) {
-        console.log("❌ [FILE] file_accept: parametri mancanti", { sessionId, fromUserId });
+      const target = getSocketId(fromUserId);
+      if (!target) {
+        console.log("⚠️ [P2P] Mittente offline in p2p_accept");
         return;
       }
 
-      if (!socket.userId) {
-        socket.userId = "1";
-        onlineUsers.set(socket.userId, socket.id);
-        console.log(`💡 [WS P2P] Associazione forzata al volo in file_accept per userId: ${socket.userId}`);
-      }
-
-      const targetSocketId = getTargetSocketId(fromUserId);
-      if (!targetSocketId) {
-        console.log("⚠️ [FILE] Mittente offline in file_accept", { fromUserId, sessionId });
-        return;
-      }
-
-      const currentUserId = socket.userId;
-
-      io.to(targetSocketId).emit("file_accept", {
+      io.to(target).emit("p2p_accept", {
         sessionId,
-        toUserId: currentUserId,
+        toUserId: socket.userId,
       });
 
-      console.log("📡 [FILE] file_accept inoltrato al mittente", {
-        fromUserId,
-        toUserId: currentUserId,
-        sessionId,
-      });
+      console.log("📡 [P2P] p2p_accept inoltrato");
     } catch (err) {
-      console.error("❌ [FILE] Errore in file_accept:", err.message);
+      console.error("❌ [P2P] Errore in p2p_accept:", err.message);
     }
   });
 
-  // -----------------------------
-  // 3) RIFIUTO FILE
-  // -----------------------------
-  socket.on("file_reject", ({ sessionId, fromUserId }) => {
+  /* ---------------------------------------------------------
+     3) RIFIUTO
+  --------------------------------------------------------- */
+  socket.on("p2p_reject", ({ sessionId, fromUserId }) => {
     try {
-      if (!sessionId || !fromUserId) return;
+      const target = getSocketId(fromUserId);
+      if (!target) return;
 
-      const targetSocketId = getTargetSocketId(fromUserId);
-      if (!targetSocketId) return;
-
-      const currentUserId = socket.userId || "1";
-
-      io.to(targetSocketId).emit("file_reject", {
+      io.to(target).emit("p2p_reject", {
         sessionId,
-        toUserId: currentUserId,
+        toUserId: socket.userId,
       });
 
-      console.log("📡 [FILE] file_reject inoltrato", {
-        fromUserId,
-        toUserId: currentUserId,
-        sessionId,
-      });
+      console.log("📡 [P2P] p2p_reject inoltrato");
     } catch (err) {
-      console.error("❌ [FILE] Errore in file_reject:", err.message);
+      console.error("❌ [P2P] Errore in p2p_reject:", err.message);
     }
   });
 
-  // -----------------------------
-  // 4) OFFER WEBRTC
-  // -----------------------------
-  socket.on("file_webrtc_offer", (data) => {
+  /* ---------------------------------------------------------
+     4) OFFER WEBRTC
+  --------------------------------------------------------- */
+  socket.on("p2p_webrtc_offer", (data) => {
     try {
-      const toUserId = data.toUserId || data.touserid;
-      const sessionId = data.sessionId || data.sessionid;
-      const offer = data.offer;
+      const { toUserId, sessionId, offer } = data;
+      const target = getSocketId(toUserId);
 
-      const targetSocketId = getTargetSocketId(toUserId);
-
-      if (!targetSocketId) {
-        console.log("⚠️ [FILE] Destinatario offline in file_webrtc_offer. Attivo Fallback HTTP.", {
-          toUserId,
-          sessionId,
-        });
-
-        socket.emit("fallback_to_http", {
-          sessionId,
-          uploadUrl: `/p2p/session/upload/${sessionId}`,
-        });
-
-        console.log(`📡 [FALLBACK] Segnale 'fallback_to_http' inviato al mittente per sessione: ${sessionId}`);
+      if (!target) {
+        console.log("⚠️ [P2P] Destinatario offline → fallback HTTP");
+        socket.emit("p2p_fallback_http", { sessionId });
         return;
       }
 
-      io.to(targetSocketId).emit("file_webrtc_offer", {
+      io.to(target).emit("p2p_webrtc_offer", {
         fromUserId: socket.userId,
         sessionId,
         offer,
       });
 
-      console.log("📡 [FILE] file_webrtc_offer inoltrato", {
-        fromUserId: socket.userId,
-        toUserId,
-        sessionId,
-      });
+      console.log("📡 [P2P] p2p_webrtc_offer inoltrato");
     } catch (err) {
-      console.error("❌ [FILE] Errore in file_webrtc_offer:", err.message);
+      console.error("❌ [P2P] Errore in p2p_webrtc_offer:", err.message);
     }
   });
 
-  // -----------------------------
-  // 5) ANSWER WEBRTC
-  // -----------------------------
-  socket.on("file_webrtc_answer", ({ toUserId, sessionId, answer }) => {
+  /* ---------------------------------------------------------
+     5) ANSWER WEBRTC
+  --------------------------------------------------------- */
+  socket.on("p2p_webrtc_answer", (data) => {
     try {
-      const targetSocketId = getTargetSocketId(toUserId);
-      if (!targetSocketId) {
-        console.log("⚠️ [FILE] Destinatario offline in file_webrtc_answer", { toUserId, sessionId });
+      const { toUserId, sessionId, answer } = data;
+      const target = getSocketId(toUserId);
+
+      if (!target) {
+        console.log("⚠️ [P2P] Destinatario offline in answer");
         return;
       }
 
-      io.to(targetSocketId).emit("file_webrtc_answer", {
+      io.to(target).emit("p2p_webrtc_answer", {
         fromUserId: socket.userId,
         sessionId,
         answer,
       });
 
-      console.log("📡 [FILE] file_webrtc_answer inoltrato", {
-        fromUserId: socket.userId,
-        toUserId,
-        sessionId,
-      });
+      console.log("📡 [P2P] p2p_webrtc_answer inoltrato");
     } catch (err) {
-      console.error("❌ [FILE] Errore in file_webrtc_answer:", err.message);
+      console.error("❌ [P2P] Errore in p2p_webrtc_answer:", err.message);
     }
   });
 
-  // -----------------------------
-  // 6) ICE CANDIDATE
-  // -----------------------------
-  socket.on("file_webrtc_ice_candidate", ({ toUserId, sessionId, candidate }) => {
+  /* ---------------------------------------------------------
+     6) ICE CANDIDATE
+  --------------------------------------------------------- */
+  socket.on("p2p_webrtc_ice", (data) => {
     try {
-      const targetSocketId = getTargetSocketId(toUserId);
-      if (!targetSocketId) {
-        console.log("⚠️ [FILE] Destinatario offline in file_webrtc_ice_candidate", { toUserId, sessionId });
-        return;
-      }
+      const { toUserId, sessionId, candidate } = data;
+      const target = getSocketId(toUserId);
 
-      io.to(targetSocketId).emit("file_webrtc_ice_candidate", {
+      if (!target) return;
+
+      io.to(target).emit("p2p_webrtc_ice", {
         fromUserId: socket.userId,
         sessionId,
         candidate,
       });
-
-      console.log("❄️ [FILE ICE] inoltrato", {
-        fromUserId: socket.userId,
-        toUserId,
-        sessionId,
-      });
     } catch (err) {
-      console.error("❌ [FILE] Errore in file_webrtc_ice_candidate:", err.message);
+      console.error("❌ [P2P] Errore in p2p_webrtc_ice:", err.message);
     }
   });
-
-  // -----------------------------
-  // 7) CANCEL TRANSFER
-  // -----------------------------
-  socket.on("file_transfer_cancel", ({ toUserId, sessionId }) => {
-    try {
-      const targetSocketId = getTargetSocketId(toUserId);
-      if (!targetSocketId) return;
-
-      io.to(targetSocketId).emit("file_transfer_cancel", {
-        fromUserId: socket.userId,
-        sessionId,
-      });
-
-      console.log("🛑 [FILE] file_transfer_cancel inoltrato", {
-        fromUserId: socket.userId,
-        toUserId,
-        sessionId,
-      });
-    } catch (err) {
-      console.error("❌ [FILE] Errore in file_transfer_cancel:", err.message);
-    }
-  });
-
 }
