@@ -8,6 +8,7 @@ import { sendFCM } from "./firebase-config.js";
 import { PassThrough } from "stream";
 
 const router = express.Router();
+const activeStreams = new Map();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
