@@ -217,7 +217,8 @@ router.get("/p2p/session/download/:sessionId", async (req, res) => {
                 await sendFcmToUser(session.from_user_id, {
                     type: "file_downloaded",
                     sessionId: String(sessionId),
-                    senderName: session.file_name
+                    senderName: session.file_name,
+                    route: "/download_center"
                 });
 
                 // Cleanup
