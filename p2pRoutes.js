@@ -64,6 +64,33 @@ async function sendFcmToUser(userId, data) {
 }
 
 /* ---------------------------------------------------------
+   0) INIT SESSION → crea solo metadati, restituisce sessionId
+--------------------------------------------------------- */
+router.post("/p2p/session/init", async (req, res) => {
+    try {
+        const { from_user_id, to_user_id, fileSize, fileType, fileName } = req.body;
+
+        if (!from_user_id || !to_user_id || !fileSize || !fileType) {
+            return res.status(400).json({ error: "Parametri mancanti" });
+        }
+
+        const sessionId = Date.now().toString();
+
+        await pool.query(
+            `INSERT INTO p2p_sessions
+            (session_id, from_user_id, to_user_id, file_size, file_type, file_name, status)
+            VALUES ($1, $2, $3, $4, $5, $6, 'init')`,
+            [sessionId, from_user_id, to_user_id, fileSize, fileType, fileName ?? ""]
+        );
+
+        return res.json({ sessionId });
+    } catch (err) {
+        console.error("❌ /p2p/session/init:", err.message);
+        return res.status(500).json({ error: err.message });
+    }
+});
+
+/* ---------------------------------------------------------
    1) CREAZIONE SESSIONE + UPLOAD FILE
 --------------------------------------------------------- */
 router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req, res) => {
@@ -78,11 +105,11 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
 
         // Salva sessione
         const result = await pool.query(
-            `INSERT INTO p2p_sessions
-            (session_id, from_user_id, to_user_id, file_size, file_type, file_name, status)
-            VALUES ($1, $2, $3, $4, $5, $6, 'uploaded')
-            RETURNING *`,
-            [sessionId, from_user_id, to_user_id, fileSize, fileType, fileName ?? ""]
+            `UPDATE p2p_sessions
+             SET file_size=$1, file_type=$2, file_name=$3, status='uploaded', updated_at=NOW()
+             WHERE session_id=$4
+             RETURNING *`,
+            [fileSize, fileType, fileName ?? "", sessionId]
         );
 
         // Nome mittente
