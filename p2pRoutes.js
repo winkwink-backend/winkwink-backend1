@@ -1,4 +1,4 @@
-// p2pRoutes.js — VERSIONE FINALE PATCHATA PER RAILWAY
+// p2pRoutes.js — VERSIONE FINALE CON CHECK AUTOMATICO POST-UPLOAD
 import express from "express";
 import fs from "fs";
 import path from "path";
@@ -10,7 +10,7 @@ import { sendFCM } from "./firebase-config.js";
 
 const router = express.Router();
 
-// Railway: directory sicura e scrivibile
+// Directory sicura e scrivibile su Railway
 const uploadDir = path.join(os.tmpdir(), "uploads");
 
 // Crea la cartella se non esiste
@@ -107,7 +107,7 @@ router.post("/p2p/session/init", async (req, res) => {
 });
 
 /* ---------------------------------------------------------
-1) UPLOAD FILE SU DISCO
+1) UPLOAD FILE SU DISCO + CHECK AUTOMATICO
 --------------------------------------------------------- */
 router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req, res) => {
   console.log("📩 [HTTP] /p2p/session/create", req.params, req.body);
@@ -125,6 +125,30 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
 
     const realSize = fs.statSync(req.file.path).size;
     console.log("📏 [UPLOAD] Dimensione reale file:", realSize);
+
+    // 🔍 CHECK AUTOMATICO DOPO 1 SECONDO
+    setTimeout(() => {
+      try {
+        const filePath = req.file.path;
+        console.log("⏳ [CHECK] Controllo file dopo upload:", filePath);
+
+        if (!fs.existsSync(filePath)) {
+          console.log("❌ [CHECK] File NON esiste dopo 1 secondo!");
+          console.log("⚠️ [CHECK] Railway potrebbe aver resettato il container.");
+          return;
+        }
+
+        const stats = fs.statSync(filePath);
+
+        console.log("✅ [CHECK] File presente!");
+        console.log("📏 [CHECK] Dimensione attuale:", stats.size, "bytes");
+        console.log("📁 [CHECK] Percorso:", filePath);
+        console.log("🕒 [CHECK] Ultima modifica:", stats.mtime);
+
+      } catch (err) {
+        console.log("❌ [CHECK] Errore durante la verifica:", err);
+      }
+    }, 1000);
 
     const result = await pool.query(
       `UPDATE p2p_sessions
@@ -173,7 +197,7 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
 });
 
 /* ---------------------------------------------------------
-4) DOWNLOAD FILE — VERSIONE CORRETTA
+4) DOWNLOAD FILE
 --------------------------------------------------------- */
 router.get("/p2p/session/download/:sessionId", async (req, res) => {
   console.log("📩 [HTTP] /p2p/session/download", req.params);
@@ -216,7 +240,6 @@ router.get("/p2p/session/download/:sessionId", async (req, res) => {
       });
 
       console.log("📡 [DOWNLOAD] FCM file_downloaded inviato");
-      console.log("🛑 [DOWNLOAD] File NON eliminato (patch diagnostica)");
     });
 
   } catch (err) {
