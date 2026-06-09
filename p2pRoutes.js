@@ -1,4 +1,4 @@
-// p2pRoutes.js (HTTP FALLBACK) — VERSIONE PATCHATA + LOG COMPLETI
+// p2pRoutes.js — VERSIONE PATCHATA PER RAILWAY
 import express from "express";
 import fs from "fs";
 import path from "path";
@@ -9,9 +9,12 @@ import { sendFCM } from "./firebase-config.js";
 
 const router = express.Router();
 
+// Railway: __dirname = /app
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const uploadDir = path.join(__dirname, "uploads");
+
+// ⭐ PATCH: cartella scrivibile su Railway
+const uploadDir = "/tmp/uploads";
 
 // Garantisce cartella uploads
 if (!fs.existsSync(uploadDir)) {
@@ -107,7 +110,7 @@ router.post("/p2p/session/init", async (req, res) => {
 });
 
 /* ---------------------------------------------------------
-1) UPLOAD FILE SU DISCO + PATCH
+1) UPLOAD FILE SU DISCO
 --------------------------------------------------------- */
 router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req, res) => {
   console.log("📩 [HTTP] /p2p/session/create", req.params, req.body);
@@ -136,7 +139,7 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
 
     console.log("📝 [DB] Sessione aggiornata:", result.rows[0]);
 
-    // 1️⃣ Notifica iniziale
+    // Notifica iniziale
     await sendFcmToUser(to_user_id, {
       type: "incoming_file",
       sessionId,
@@ -148,9 +151,7 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
 
     console.log("📡 [UPLOAD] FCM incoming_file inviato");
 
-    // ⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐
-    // 2️⃣ PATCH: Notifica con link pronto
-    // ⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐
+    // Notifica con link pronto
     await sendFcmToUser(to_user_id, {
       type: "file_ready_for_download",
       sessionId,
@@ -161,7 +162,6 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
     });
 
     console.log("📡 [UPLOAD] FCM file_ready_for_download inviato");
-    // ⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐
 
     return res.json({
       session: result.rows[0],
@@ -176,7 +176,7 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
 });
 
 /* ---------------------------------------------------------
-4) DOWNLOAD DA DISCO
+4) DOWNLOAD DA DISCO — SENZA CANCELLAZIONE FILE
 --------------------------------------------------------- */
 router.get("/p2p/session/download/:sessionId", async (req, res) => {
   console.log("📩 [HTTP] /p2p/session/download", req.params);
@@ -209,7 +209,7 @@ router.get("/p2p/session/download/:sessionId", async (req, res) => {
     stream.pipe(res);
 
     stream.on("close", async () => {
-      console.log("📤 [DOWNLOAD] File inviato, aggiorno DB e cancello file");
+      console.log("📤 [DOWNLOAD] File inviato");
 
       await updateSessionStatus(sessionId, "completed");
 
@@ -218,12 +218,9 @@ router.get("/p2p/session/download/:sessionId", async (req, res) => {
         sessionId,
       });
 
-      try {
-        //fs.unlinkSync(filePath);
-        //console.log("🗑️ [DOWNLOAD] File eliminato dal server");
-      } catch (e) {
-        console.log("⚠️ [DOWNLOAD] Errore eliminazione file:", e);
-      }
+      console.log("📡 [DOWNLOAD] FCM file_downloaded inviato al mittente");
+
+      console.log("🛑 [DOWNLOAD] File NON eliminato (patch diagnostica)");
     });
 
   } catch (err) {
