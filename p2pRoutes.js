@@ -1,7 +1,8 @@
-// p2pRoutes.js — VERSIONE PATCHATA PER RAILWAY
+// p2pRoutes.js — VERSIONE FINALE PATCHATA PER RAILWAY
 import express from "express";
 import fs from "fs";
 import path from "path";
+import os from "os";
 import multer from "multer";
 import { fileURLToPath } from "url";
 import pool from "./db.js";
@@ -9,14 +10,10 @@ import { sendFCM } from "./firebase-config.js";
 
 const router = express.Router();
 
-// Railway: __dirname = /app
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Railway: directory sicura e scrivibile
+const uploadDir = path.join(os.tmpdir(), "uploads");
 
-// ⭐ PATCH: cartella scrivibile su Railway
-const uploadDir = "/tmp/uploads";
-
-// Garantisce cartella uploads
+// Crea la cartella se non esiste
 if (!fs.existsSync(uploadDir)) {
   console.log("📁 [INIT] Creo cartella uploads:", uploadDir);
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -24,7 +21,7 @@ if (!fs.existsSync(uploadDir)) {
   console.log("📁 [INIT] Cartella uploads esiste:", uploadDir);
 }
 
-// Multer: salva file con nome = sessionId
+// Multer: salva SEMPRE con nome = sessionId
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     console.log("📥 [MULTER] Salvataggio file in:", uploadDir);
@@ -32,7 +29,7 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     console.log("📥 [MULTER] Nome file assegnato:", req.params.sessionId);
-    cb(null, `${req.params.sessionId}`);
+    cb(null, req.params.sessionId);
   },
 });
 const upload = multer({ storage });
@@ -124,7 +121,7 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
       return res.status(400).json({ error: "File mancante" });
     }
 
-    console.log("📦 [UPLOAD] File ricevuto:", req.file.path);
+    console.log("📦 [UPLOAD] File salvato:", req.file.path);
 
     const realSize = fs.statSync(req.file.path).size;
     console.log("📏 [UPLOAD] Dimensione reale file:", realSize);
@@ -139,7 +136,7 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
 
     console.log("📝 [DB] Sessione aggiornata:", result.rows[0]);
 
-    // Notifica iniziale
+    // Notifica ricevente
     await sendFcmToUser(to_user_id, {
       type: "incoming_file",
       sessionId,
@@ -151,14 +148,14 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
 
     console.log("📡 [UPLOAD] FCM incoming_file inviato");
 
-    // Notifica con link pronto
+    // Notifica link pronto
     await sendFcmToUser(to_user_id, {
       type: "file_ready_for_download",
       sessionId,
       fileName: fileName ?? "file",
       fileType,
       fileSize: String(fileSize),
-      downloadUrl: `/p2p/session/download/${sessionId}`
+      downloadUrl: `/p2p/session/download/${sessionId}`,
     });
 
     console.log("📡 [UPLOAD] FCM file_ready_for_download inviato");
@@ -176,7 +173,7 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
 });
 
 /* ---------------------------------------------------------
-4) DOWNLOAD DA DISCO — SENZA CANCELLAZIONE FILE
+4) DOWNLOAD FILE — VERSIONE CORRETTA
 --------------------------------------------------------- */
 router.get("/p2p/session/download/:sessionId", async (req, res) => {
   console.log("📩 [HTTP] /p2p/session/download", req.params);
@@ -190,8 +187,8 @@ router.get("/p2p/session/download/:sessionId", async (req, res) => {
       return res.status(404).send("Sessione non trovata");
     }
 
-    const filePath = path.join(uploadDir, String(sessionId));
-    console.log("📁 [DOWNLOAD] File path:", filePath);
+    const filePath = path.join(uploadDir, sessionId);
+    console.log("📁 [DOWNLOAD] Cerco file:", filePath);
 
     if (!fs.existsSync(filePath)) {
       console.log("❌ [DOWNLOAD] File non disponibile");
@@ -218,8 +215,7 @@ router.get("/p2p/session/download/:sessionId", async (req, res) => {
         sessionId,
       });
 
-      console.log("📡 [DOWNLOAD] FCM file_downloaded inviato al mittente");
-
+      console.log("📡 [DOWNLOAD] FCM file_downloaded inviato");
       console.log("🛑 [DOWNLOAD] File NON eliminato (patch diagnostica)");
     });
 
