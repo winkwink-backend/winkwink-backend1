@@ -219,8 +219,8 @@ router.get("/p2p/session/download/:sessionId", async (req, res) => {
       });
 
       try {
-        fs.unlinkSync(filePath);
-        console.log("🗑️ [DOWNLOAD] File eliminato dal server");
+        //fs.unlinkSync(filePath);
+        //console.log("🗑️ [DOWNLOAD] File eliminato dal server");
       } catch (e) {
         console.log("⚠️ [DOWNLOAD] Errore eliminazione file:", e);
       }
