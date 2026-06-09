@@ -1,4 +1,4 @@
-// p2pRoutes.js (HTTP FALLBACK) — VERSIONE CON LOG COMPLETI
+// p2pRoutes.js (HTTP FALLBACK) — VERSIONE PATCHATA + LOG COMPLETI
 import express from "express";
 import fs from "fs";
 import path from "path";
@@ -107,7 +107,7 @@ router.post("/p2p/session/init", async (req, res) => {
 });
 
 /* ---------------------------------------------------------
-1) UPLOAD FILE SU DISCO
+1) UPLOAD FILE SU DISCO + PATCH
 --------------------------------------------------------- */
 router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req, res) => {
   console.log("📩 [HTTP] /p2p/session/create", req.params, req.body);
@@ -136,6 +136,7 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
 
     console.log("📝 [DB] Sessione aggiornata:", result.rows[0]);
 
+    // 1️⃣ Notifica iniziale
     await sendFcmToUser(to_user_id, {
       type: "incoming_file",
       sessionId,
@@ -146,6 +147,21 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
     });
 
     console.log("📡 [UPLOAD] FCM incoming_file inviato");
+
+    // ⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐
+    // 2️⃣ PATCH: Notifica con link pronto
+    // ⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐
+    await sendFcmToUser(to_user_id, {
+      type: "file_ready_for_download",
+      sessionId,
+      fileName: fileName ?? "file",
+      fileType,
+      fileSize: String(fileSize),
+      downloadUrl: `/p2p/session/download/${sessionId}`
+    });
+
+    console.log("📡 [UPLOAD] FCM file_ready_for_download inviato");
+    // ⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐⭐
 
     return res.json({
       session: result.rows[0],
