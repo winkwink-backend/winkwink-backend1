@@ -12,7 +12,8 @@ import "./firebase-config.js";
 import pool from "./db.js";
 
 import authRoutes from "./authRoutes.js";
-import p2pRoutes from "./p2pRoutes.js";
+import p2pRoutes from "./p2pRoutes.js";          // ⭐ FALLBACK HTTP (app chiusa)
+import p2pHttpRoutes from "./p2pHttpRoutes.js";  // ⭐ P2P STREAMING (app aperta)
 import chatRoutes from "./chatRoutes.js";
 import uploadRoutes from "./uploadRoutes.js";
 
@@ -59,7 +60,7 @@ const io = new Server(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] },
 });
 
-// ⭐ Espongo io / onlineUsers anche agli handler HTTP (es. file_accept_http)
+// ⭐ Espongo io / onlineUsers anche agli handler HTTP
 app.set("io", io);
 app.set("onlineUsers", onlineUsers);
 app.set("chatRooms", chatRooms);
@@ -74,17 +75,18 @@ app.use((req, res, next) => {
 
 // ⭐ Rotte HTTP
 app.use(authRoutes);
-app.use(p2pRoutes);
+app.use(p2pHttpRoutes);   // ⭐ P2P streaming (app aperta)
+app.use(p2pRoutes);       // ⭐ fallback HTTP (app chiusa)
 app.use(chatRoutes);
-app.use("/chat", uploadRoutes); // ⭐ NUOVO ENDPOINT UPLOAD
+app.use("/chat", uploadRoutes);
 
 // Healthcheck
 app.get("/", (req, res) => res.send("Backend WinkWink attivo e modulare"));
 
-// ⭐ Socket (presenza + chat + WebRTC)
+// ⭐ Socket (presenza + chat + WebRTC + P2P)
 io.on("connection", (socket) => {
-  registerSocketHandlers(io, socket, pool, onlineUsers, chatRooms); // chat + signaling chiamate
-  registerFileP2PHandlers(io, socket, onlineUsers);                 // P2P file segreti
+  registerSocketHandlers(io, socket, pool, onlineUsers, chatRooms);
+  registerFileP2PHandlers(io, socket, onlineUsers);
 });
 
 const PORT = process.env.PORT || 10000;
@@ -104,4 +106,4 @@ WHERE created_at < NOW() - INTERVAL '72 hours'
   } catch (err) {
     console.error("❌ Errore pulizia messaggi:", err.message);
   }
-}, 1000 * 60 * 60); // ogni ora
+}, 1000 * 60 * 60);

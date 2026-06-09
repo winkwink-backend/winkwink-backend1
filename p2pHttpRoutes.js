@@ -1,7 +1,5 @@
-// p2pHttpRoutes.js
 import express from "express";
 import pool from "./db.js";
-import { sendFCM } from "./firebase-config.js";
 import { PassThrough } from "stream";
 
 const router = express.Router();
@@ -28,19 +26,8 @@ async function updateStatus(sessionId, status) {
   );
 }
 
-async function sendFcmToUser(userId, data) {
-  const res = await pool.query(
-    "SELECT fcm_token FROM users WHERE id = $1",
-    [userId]
-  );
-  const token = res.rows[0]?.fcm_token;
-  if (!token) return;
-
-  await sendFCM({ token, data });
-}
-
 /* ---------------------------------------------------------
-   1) CREAZIONE SESSIONE (mittente → ricevente)
+   1) CREAZIONE SESSIONE (solo metadati)
 --------------------------------------------------------- */
 
 router.post("/p2p/session/create", async (req, res) => {
@@ -61,19 +48,9 @@ router.post("/p2p/session/create", async (req, res) => {
       [sessionId, from_user_id, to_user_id, fileSize, fileType, fileName ?? ""]
     );
 
-    // 🔥 Notifica FCM al ricevente
-    await sendFcmToUser(to_user_id, {
-      type: "incoming_file",
-      sessionId,
-      senderId: String(from_user_id),
-      fileName: fileName ?? "",
-      fileType,
-      fileSize: String(fileSize),
-    });
-
     return res.json({
       session: result.rows[0],
-      delivered: "fcm",
+      delivered: "ws",
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });
@@ -81,17 +58,13 @@ router.post("/p2p/session/create", async (req, res) => {
 });
 
 /* ---------------------------------------------------------
-   2) ACCETTAZIONE (ricevente → server)
+   2) ACCEPT (solo WebSocket)
 --------------------------------------------------------- */
 
 router.post("/p2p/session/accept", async (req, res) => {
   try {
-    const sessionId = req.body.sessionId || req.body.sessionid;
-    const userId = req.body.userId || req.body.userid;
-
-    if (!sessionId || !userId) {
-      return res.status(400).json({ error: "Parametri mancanti" });
-    }
+    const sessionId = req.body.sessionId;
+    const userId = req.body.userId;
 
     const session = await getSession(sessionId);
     if (!session) return res.status(404).json({ error: "Sessione non trovata" });
@@ -102,7 +75,6 @@ router.post("/p2p/session/accept", async (req, res) => {
 
     await updateStatus(sessionId, "accepted");
 
-    // 🔥 Notifica WS al mittente (se online)
     const io = req.io;
     const onlineUsers = req.onlineUsers;
 
@@ -114,16 +86,6 @@ router.post("/p2p/session/accept", async (req, res) => {
         fileType: session.file_type,
         fileSize: session.file_size,
         receiverId: session.to_user_id,
-      });
-    } else {
-      // 🔥 Fallback FCM
-      await sendFcmToUser(session.from_user_id, {
-        type: "start_sending_file",
-        sessionId,
-        fileName: session.file_name,
-        fileType: session.file_type,
-        fileSize: String(session.file_size),
-        receiverId: String(session.to_user_id),
       });
     }
 
@@ -137,7 +99,7 @@ router.post("/p2p/session/accept", async (req, res) => {
 });
 
 /* ---------------------------------------------------------
-   3) UPLOAD (mittente → server)
+   3) UPLOAD STREAMING (mittente → RAM)
 --------------------------------------------------------- */
 
 router.post("/p2p/session/upload/:sessionId", async (req, res) => {
@@ -158,16 +120,13 @@ router.post("/p2p/session/upload/:sessionId", async (req, res) => {
 
     await updateStatus(sessionId, "uploaded");
 
-    req.on("end", () => {
-      console.log(`Mittente ha finito upload: ${sessionId}`);
-    });
-
     tunnel.on("end", () => {
       activeStreams.delete(sessionId);
-      return res.json({
-        status: "ready_for_download",
-        sessionId,
-      });
+    });
+
+    return res.json({
+      status: "ready_for_download",
+      sessionId,
     });
   } catch (err) {
     activeStreams.delete(req.params.sessionId);
@@ -176,7 +135,7 @@ router.post("/p2p/session/upload/:sessionId", async (req, res) => {
 });
 
 /* ---------------------------------------------------------
-   4) DOWNLOAD (mittente → server)
+   4) DOWNLOAD STREAMING (RAM → ricevente)
 --------------------------------------------------------- */
 
 router.get("/p2p/session/download/:sessionId", async (req, res) => {
@@ -187,9 +146,7 @@ router.get("/p2p/session/download/:sessionId", async (req, res) => {
     if (!session) return res.status(404).send("Sessione non trovata");
 
     const tunnel = activeStreams.get(sessionId);
-    if (!tunnel) {
-      return res.status(404).send("File non disponibile");
-    }
+    if (!tunnel) return res.status(404).send("File non disponibile");
 
     res.setHeader("Content-Type", "application/octet-stream");
     res.setHeader(
