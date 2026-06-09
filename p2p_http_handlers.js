@@ -51,7 +51,7 @@ async function sendFcmToUser(userId, data) {
 }
 
 /* ---------------------------------------------------------
-   1) CREAZIONE SESSIONE + UPLOAD FILE
+   1) CREAZIONE SESSIONE + UPLOAD FILE  ⭐ PATCH COMPLETA
 --------------------------------------------------------- */
 router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req, res) => {
     try {
@@ -71,6 +71,7 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
             [sessionId, from_user_id, to_user_id, fileSize, fileType, fileName ?? ""]
         );
 
+        // 1️⃣ Notifica iniziale
         await sendFcmToUser(to_user_id, {
             type: "incoming_file",
             sessionId,
@@ -80,11 +81,22 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
             fileSize: String(fileSize)
         });
 
+        // ⭐⭐⭐ PATCH: Notifica con link pronto ⭐⭐⭐
+        await sendFcmToUser(to_user_id, {
+            type: "file_ready_for_download",
+            sessionId,
+            fileName: fileName ?? "file",
+            fileType,
+            fileSize: String(fileSize),
+            downloadUrl: `/p2p/session/download/${sessionId}`
+        });
+
         return res.json({
             session: result.rows[0],
             delivered: "fcm",
             status: "file_stored_on_server"
         });
+
     } catch (err) {
         if (req.file) try { fs.unlinkSync(req.file.path); } catch {}
         return res.status(500).json({ error: err.message });

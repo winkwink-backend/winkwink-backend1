@@ -1,234 +1,211 @@
-import express from "express";
-import fs from "fs";
-import path from "path";
-import multer from "multer";
-import { fileURLToPath } from "url";
-import pool from "./db.js";
 import { sendFCM } from "./firebase-config.js";
 
-const router = express.Router();
+export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms) => {
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const uploadDir = path.join(__dirname, "uploads");
-
-// Garantisce cartella uploads
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// Multer: salva file con nome = sessionId
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => cb(null, `${req.params.sessionId}`),
-});
-const upload = multer({ storage });
-
-// Helpers
-async function getSession(sessionId) {
-  const result = await pool.query(
-    "SELECT * FROM p2p_sessions WHERE session_id = $1",
-    [sessionId]
-  );
-  return result.rows[0] || null;
-}
-
-async function updateSessionStatus(sessionId, status) {
-  await pool.query(
-    "UPDATE p2p_sessions SET status = $1, updated_at = NOW() WHERE session_id = $2",
-    [status, sessionId]
-  );
-}
-
-async function sendFcmToUser(userId, data) {
-  const res = await pool.query(
-    "SELECT fcm_token FROM users WHERE id = $1",
-    [userId]
-  );
-  const token = res.rows[0]?.fcm_token;
-  if (!token) return;
-
-  await sendFCM({
-    token,
-    data,
-    notification: {
-      title: "WinkWink",
-      body:
-        data.type === "incoming_file"
-          ? `${data.senderName} ti ha inviato un file`
-          : "Aggiornamento file",
-    },
-    android: { priority: "high" },
+  // ============================================================
+  // LOG DIAGNOSTICO
+  // ============================================================
+  socket.onAny((eventName, ...args) => {
+    console.log(`📡 [WS EVENT] Ricevuto: "${eventName}" con dati:`, JSON.stringify(args));
   });
-}
 
-/* ---------------------------------------------------------
-0) INIT SESSION
---------------------------------------------------------- */
-router.post("/p2p/session/init", async (req, res) => {
-  try {
-    const { from_user_id, to_user_id, fileSize, fileType, fileName } = req.body;
+  // ============================================================
+  // PRESENZA (CHAT + P2P)
+  // ============================================================
+  socket.on("register", (userId) => {
+    socket.userId = String(userId);
+    onlineUsers.set(String(userId), socket.id);
+    io.emit("user_online", { userId });
+  });
 
-    if (!from_user_id || !to_user_id || !fileSize || !fileType) {
-      return res.status(400).json({ error: "Parametri mancanti" });
+  socket.on("disconnect", (reason) => {
+    if (socket.userId) {
+      onlineUsers.delete(socket.userId);
+      io.emit("user_offline", { userId: socket.userId });
     }
+  });
 
-    const sessionId = Date.now().toString();
+  // ============================================================
+  // CHAT (stanze)
+  // ============================================================
+  socket.on("enter_chat", ({ chat_id, user_id }) => {
+    if (!chatRooms.has(chat_id)) chatRooms.set(chat_id, new Set());
+    chatRooms.get(chat_id).add(socket.id);
 
-    await pool.query(
-      `INSERT INTO p2p_sessions
-      (session_id, from_user_id, to_user_id, file_size, file_type, file_name, status)
-      VALUES ($1,$2,$3,$4,$5,$6,'init')`,
-      [sessionId, from_user_id, to_user_id, fileSize, fileType, fileName ?? ""]
-    );
+    socket.join(`chat_${chat_id}`);
+    io.to(socket.id).emit("chat_joined", { chat_id });
+    io.emit("user_in_chat", { chat_id, user_id });
+  });
 
-    return res.json({ sessionId });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-/* ---------------------------------------------------------
-1) UPLOAD FILE SU DISCO
---------------------------------------------------------- */
-router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    const { from_user_id, to_user_id, fileSize, fileType, fileName } = req.body;
-
-    if (!from_user_id || !to_user_id || !fileSize || !fileType) {
-      if (req.file) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: "Parametri mancanti" });
+  socket.on("leave_chat", ({ chat_id, user_id }) => {
+    if (chatRooms.has(chat_id)) {
+      chatRooms.get(chat_id).delete(socket.id);
+      if (chatRooms.get(chat_id).size === 0) chatRooms.delete(chat_id);
     }
+    socket.leave(`chat_${chat_id}`);
+  });
 
-    const result = await pool.query(
-      `UPDATE p2p_sessions
-       SET file_size=$1, file_type=$2, file_name=$3, status='uploaded', updated_at=NOW()
-       WHERE session_id=$4
-       RETURNING *`,
-      [fileSize, fileType, fileName ?? "", sessionId]
-    );
+  socket.on("send_message", async (data) => {
+    try {
+      // DELETE
+      if (data.type === "delete") {
+        io.to(`chat_${data.chatId}`).emit("new_message", {
+          chat_id: data.chatId,
+          type: "delete",
+          id: data.id,
+        });
+        return;
+      }
 
-    const senderRes = await pool.query(
-      "SELECT name FROM users WHERE id = $1",
-      [from_user_id]
-    );
-    const senderName = senderRes.rows[0]?.name ?? "";
+      // NORMALE
+      const { chatId, senderId, receiverId, content, type } = data;
 
-    await sendFcmToUser(to_user_id, {
-      type: "incoming_file",
-      sessionId,
-      senderId: String(from_user_id),
-      senderName,
-      fileName: fileName ?? "file",
-      fileType,
-      fileSize: String(fileSize),
-    });
+      const result = await pool.query(
+        `INSERT INTO chat_messages (chat_id, sender_id, receiver_id, content, type, status)
+         VALUES ($1, $2, $3, $4, $5, 'sent')
+         RETURNING *`,
+        [chatId, senderId, receiverId, content, type ?? "text"]
+      );
 
-    return res.json({
-      session: result.rows[0],
-      delivered: "fcm",
-      status: "file_stored_on_server",
-    });
-  } catch (err) {
-    if (req.file) try { fs.unlinkSync(req.file.path); } catch {}
-    return res.status(500).json({ error: err.message });
-  }
-});
+      const saved = result.rows[0];
 
-/* ---------------------------------------------------------
-2) ACCEPT → DOWNLOAD URL
---------------------------------------------------------- */
-router.post("/p2p/session/accept", async (req, res) => {
-  try {
-    const sessionId = req.body.sessionId;
-    const userId = req.body.userId;
-
-    const session = await getSession(sessionId);
-    if (!session) return res.status(404).json({ error: "Sessione non trovata" });
-
-    if (String(session.to_user_id) !== String(userId)) {
-      return res.status(403).json({ error: "Non autorizzato" });
-    }
-
-    await updateSessionStatus(sessionId, "accepted");
-
-    return res.json({
-      status: "ok",
-      downloadUrl: `/p2p/session/download/${sessionId}`,
-      fileName: session.file_name,
-    });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-/* ---------------------------------------------------------
-3) REJECT
---------------------------------------------------------- */
-router.post("/p2p/session/reject", async (req, res) => {
-  try {
-    const sessionId = req.body.sessionId;
-    const userId = req.body.userId;
-
-    const session = await getSession(sessionId);
-    if (!session) return res.status(404).json({ error: "Sessione non trovata" });
-
-    await updateSessionStatus(sessionId, "rejected");
-
-    const filePath = path.join(uploadDir, String(sessionId));
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-
-    await sendFcmToUser(session.from_user_id, {
-      type: "file_rejected_alert",
-      sessionId,
-    });
-
-    return res.json({ status: "ok" });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-/* ---------------------------------------------------------
-4) DOWNLOAD DA DISCO (PATCHATO)
---------------------------------------------------------- */
-router.get("/p2p/session/download/:sessionId", async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-
-    const session = await getSession(sessionId);
-    if (!session) return res.status(404).send("Sessione non trovata");
-
-    const filePath = path.join(uploadDir, String(sessionId));
-    if (!fs.existsSync(filePath)) return res.status(404).send("File non disponibile");
-
-    res.setHeader("Content-Type", "application/octet-stream");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${session.file_name}"`
-    );
-    res.setHeader("Content-Length", String(session.file_size));
-
-    const stream = fs.createReadStream(filePath);
-    stream.pipe(res);
-
-    stream.on("close", async () => {
-      await updateSessionStatus(sessionId, "completed");
-
-      await sendFcmToUser(session.from_user_id, {
-        type: "file_downloaded",
-        sessionId,
-        senderName: session.file_name,
-        route: "/download_center",
+      io.to(`chat_${chatId}`).emit("new_message", {
+        id: saved.id,
+        chat_id: chatId,
+        sender_id: saved.sender_id,
+        receiver_id: saved.receiver_id,
+        content: saved.content,
+        type: saved.type,
+        status: saved.status,
+        created_at: saved.created_at,
       });
 
-      try { fs.unlinkSync(filePath); } catch {}
+    } catch (err) {
+      console.error("❌ ERRORE SQL SOCKET:", err.message);
+    }
+  });
+
+  // ============================================================
+  // SIGNALING WEBRTC (solo chat/video)
+  // ============================================================
+  socket.on("offer", ({ toUserId, offer }) => {
+    const target = onlineUsers.get(String(toUserId));
+    if (target) io.to(target).emit("offer", { from: socket.userId, offer });
+  });
+
+  socket.on("answer", ({ toUserId, answer }) => {
+    const target = onlineUsers.get(String(toUserId));
+    if (target) io.to(target).emit("answer", { from: socket.userId, answer });
+  });
+
+  socket.on("ice_candidate", ({ toUserId, candidate }) => {
+    const target = onlineUsers.get(String(toUserId));
+    if (target) io.to(target).emit("ice_candidate", { from: socket.userId, candidate });
+  });
+
+  // ============================================================
+  // ⭐ P2P WEBRTC (APP APERTA) — AGGIUNTO QUI
+  // ============================================================
+
+  // Alias compatibilità Flutter
+  const alias = (from, to) => {
+    socket.on(from, (data) => socket.emit(to, data));
+  };
+
+  alias("file_create_session", "p2p_create_session");
+  alias("file_accept", "p2p_accept");
+  alias("file_reject", "p2p_reject");
+  alias("file_webrtc_offer", "p2p_webrtc_offer");
+  alias("file_webrtc_answer", "p2p_webrtc_answer");
+  alias("file_webrtc_ice_candidate", "p2p_webrtc_ice");
+
+  // Registrazione P2P
+  socket.on("register_p2p", ({ userId }) => {
+    onlineUsers.set(String(userId), socket.id);
+    socket.userId = String(userId);
+  });
+
+  // CREATE SESSION
+  socket.on("p2p_create_session", (data) => {
+    const { sessionId, toUserId, fileName, fileType, fileSize } = data;
+    const target = onlineUsers.get(String(toUserId));
+
+    if (!target) {
+      socket.emit("p2p_fallback_http", { sessionId });
+      return;
+    }
+
+    io.to(target).emit("p2p_incoming", {
+      sessionId,
+      fromUserId: socket.userId,
+      fileName,
+      fileType,
+      fileSize
     });
+  });
 
-  } catch (err) {
-    return res.status(500).send("Errore interno");
-  }
-});
+  // ACCEPT
+  socket.on("p2p_accept", ({ sessionId, fromUserId }) => {
+    const target = onlineUsers.get(String(fromUserId));
+    if (target) {
+      io.to(target).emit("p2p_accept", {
+        sessionId,
+        toUserId: socket.userId
+      });
+    }
+  });
 
-export default router;
+  // REJECT
+  socket.on("p2p_reject", ({ sessionId, fromUserId }) => {
+    const target = onlineUsers.get(String(fromUserId));
+    if (target) {
+      io.to(target).emit("p2p_reject", {
+        sessionId,
+        toUserId: socket.userId
+      });
+    }
+  });
+
+  // OFFER
+  socket.on("p2p_webrtc_offer", (data) => {
+    const { toUserId, sessionId, offer } = data;
+    const target = onlineUsers.get(String(toUserId));
+
+    if (!target) {
+      socket.emit("p2p_fallback_http", { sessionId });
+      return;
+    }
+
+    io.to(target).emit("p2p_webrtc_offer", {
+      sessionId,
+      fromUserId: socket.userId,
+      offer
+    });
+  });
+
+  // ANSWER
+  socket.on("p2p_webrtc_answer", (data) => {
+    const { toUserId, sessionId, answer } = data;
+    const target = onlineUsers.get(String(toUserId));
+    if (target) {
+      io.to(target).emit("p2p_webrtc_answer", {
+        sessionId,
+        fromUserId: socket.userId,
+        answer
+      });
+    }
+  });
+
+  // ICE
+  socket.on("p2p_webrtc_ice", (data) => {
+    const { toUserId, sessionId, candidate } = data;
+    const target = onlineUsers.get(String(toUserId));
+    if (target) {
+      io.to(target).emit("p2p_webrtc_ice", {
+        sessionId,
+        fromUserId: socket.userId,
+        candidate
+      });
+    }
+  });
+};

@@ -1,3 +1,5 @@
+//anche se ho nominato httproutes è p2p non http ad app chiusa
+
 import express from "express";
 import pool from "./db.js";
 import { PassThrough } from "stream";
