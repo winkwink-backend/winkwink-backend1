@@ -1,4 +1,4 @@
-// questo file è http 
+// p2pRoutes.js (HTTP FALLBACK) — VERSIONE CON LOG COMPLETI
 import express from "express";
 import fs from "fs";
 import path from "path";
@@ -15,18 +15,28 @@ const uploadDir = path.join(__dirname, "uploads");
 
 // Garantisce cartella uploads
 if (!fs.existsSync(uploadDir)) {
+  console.log("📁 [INIT] Creo cartella uploads:", uploadDir);
   fs.mkdirSync(uploadDir, { recursive: true });
+} else {
+  console.log("📁 [INIT] Cartella uploads esiste:", uploadDir);
 }
 
 // Multer: salva file con nome = sessionId
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => cb(null, `${req.params.sessionId}`),
+  destination: (req, file, cb) => {
+    console.log("📥 [MULTER] Salvataggio file in:", uploadDir);
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    console.log("📥 [MULTER] Nome file assegnato:", req.params.sessionId);
+    cb(null, `${req.params.sessionId}`);
+  },
 });
 const upload = multer({ storage });
 
 // Helpers
 async function getSession(sessionId) {
+  console.log("🔍 [DB] Recupero sessione:", sessionId);
   const result = await pool.query(
     "SELECT * FROM p2p_sessions WHERE session_id = $1",
     [sessionId]
@@ -35,6 +45,7 @@ async function getSession(sessionId) {
 }
 
 async function updateSessionStatus(sessionId, status) {
+  console.log(`📝 [DB] Aggiorno sessione ${sessionId} → ${status}`);
   await pool.query(
     "UPDATE p2p_sessions SET status = $1, updated_at = NOW() WHERE session_id = $2",
     [status, sessionId]
@@ -42,39 +53,44 @@ async function updateSessionStatus(sessionId, status) {
 }
 
 async function sendFcmToUser(userId, data) {
+  console.log("📡 [FCM] Invio FCM a user:", userId, "payload:", data);
+
   const res = await pool.query(
     "SELECT fcm_token FROM users WHERE id = $1",
     [userId]
   );
   const token = res.rows[0]?.fcm_token;
-  if (!token) return;
+
+  if (!token) {
+    console.log("⚠️ [FCM] Nessun token FCM per user:", userId);
+    return;
+  }
 
   await sendFCM({
     token,
     data,
-    notification: {
-      title: "WinkWink",
-      body:
-        data.type === "incoming_file"
-          ? `${data.senderName} ti ha inviato un file`
-          : "Aggiornamento file",
-    },
     android: { priority: "high" },
   });
+
+  console.log("✅ [FCM] FCM inviato con successo");
 }
 
 /* ---------------------------------------------------------
 0) INIT SESSION
 --------------------------------------------------------- */
 router.post("/p2p/session/init", async (req, res) => {
+  console.log("📩 [HTTP] /p2p/session/init", req.body);
+
   try {
     const { from_user_id, to_user_id, fileSize, fileType, fileName } = req.body;
 
     if (!from_user_id || !to_user_id || !fileSize || !fileType) {
+      console.log("❌ [INIT] Parametri mancanti");
       return res.status(400).json({ error: "Parametri mancanti" });
     }
 
     const sessionId = Date.now().toString();
+    console.log("🆕 [INIT] Creata sessione:", sessionId);
 
     await pool.query(
       `INSERT INTO p2p_sessions
@@ -85,6 +101,7 @@ router.post("/p2p/session/init", async (req, res) => {
 
     return res.json({ sessionId });
   } catch (err) {
+    console.error("❌ [INIT] Errore:", err);
     return res.status(500).json({ error: err.message });
   }
 });
@@ -93,14 +110,21 @@ router.post("/p2p/session/init", async (req, res) => {
 1) UPLOAD FILE SU DISCO
 --------------------------------------------------------- */
 router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req, res) => {
+  console.log("📩 [HTTP] /p2p/session/create", req.params, req.body);
+
   try {
     const { sessionId } = req.params;
     const { from_user_id, to_user_id, fileSize, fileType, fileName } = req.body;
 
-    if (!from_user_id || !to_user_id || !fileSize || !fileType) {
-      if (req.file) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: "Parametri mancanti" });
+    if (!req.file) {
+      console.log("❌ [UPLOAD] Nessun file ricevuto da Multer");
+      return res.status(400).json({ error: "File mancante" });
     }
+
+    console.log("📦 [UPLOAD] File ricevuto:", req.file.path);
+
+    const realSize = fs.statSync(req.file.path).size;
+    console.log("📏 [UPLOAD] Dimensione reale file:", realSize);
 
     const result = await pool.query(
       `UPDATE p2p_sessions
@@ -110,99 +134,53 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
       [fileSize, fileType, fileName ?? "", sessionId]
     );
 
-    const senderRes = await pool.query(
-      "SELECT name FROM users WHERE id = $1",
-      [from_user_id]
-    );
-    const senderName = senderRes.rows[0]?.name ?? "";
+    console.log("📝 [DB] Sessione aggiornata:", result.rows[0]);
 
     await sendFcmToUser(to_user_id, {
       type: "incoming_file",
       sessionId,
       senderId: String(from_user_id),
-      senderName,
       fileName: fileName ?? "file",
       fileType,
       fileSize: String(fileSize),
     });
+
+    console.log("📡 [UPLOAD] FCM incoming_file inviato");
 
     return res.json({
       session: result.rows[0],
       delivered: "fcm",
       status: "file_stored_on_server",
     });
+
   } catch (err) {
-    if (req.file) try { fs.unlinkSync(req.file.path); } catch {}
+    console.error("❌ [UPLOAD] Errore:", err);
     return res.status(500).json({ error: err.message });
   }
 });
 
 /* ---------------------------------------------------------
-2) ACCEPT → DOWNLOAD URL
---------------------------------------------------------- */
-router.post("/p2p/session/accept", async (req, res) => {
-  try {
-    const sessionId = req.body.sessionId;
-    const userId = req.body.userId;
-
-    const session = await getSession(sessionId);
-    if (!session) return res.status(404).json({ error: "Sessione non trovata" });
-
-    if (String(session.to_user_id) !== String(userId)) {
-      return res.status(403).json({ error: "Non autorizzato" });
-    }
-
-    await updateSessionStatus(sessionId, "accepted");
-
-    return res.json({
-      status: "ok",
-      downloadUrl: `/p2p/session/download/${sessionId}`,
-      fileName: session.file_name,
-    });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-/* ---------------------------------------------------------
-3) REJECT
---------------------------------------------------------- */
-router.post("/p2p/session/reject", async (req, res) => {
-  try {
-    const sessionId = req.body.sessionId;
-    const userId = req.body.userId;
-
-    const session = await getSession(sessionId);
-    if (!session) return res.status(404).json({ error: "Sessione non trovata" });
-
-    await updateSessionStatus(sessionId, "rejected");
-
-    const filePath = path.join(uploadDir, String(sessionId));
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-
-    await sendFcmToUser(session.from_user_id, {
-      type: "file_rejected_alert",
-      sessionId,
-    });
-
-    return res.json({ status: "ok" });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-/* ---------------------------------------------------------
-4) DOWNLOAD DA DISCO (PATCHATO)
+4) DOWNLOAD DA DISCO
 --------------------------------------------------------- */
 router.get("/p2p/session/download/:sessionId", async (req, res) => {
+  console.log("📩 [HTTP] /p2p/session/download", req.params);
+
   try {
     const { sessionId } = req.params;
 
     const session = await getSession(sessionId);
-    if (!session) return res.status(404).send("Sessione non trovata");
+    if (!session) {
+      console.log("❌ [DOWNLOAD] Sessione non trovata");
+      return res.status(404).send("Sessione non trovata");
+    }
 
     const filePath = path.join(uploadDir, String(sessionId));
-    if (!fs.existsSync(filePath)) return res.status(404).send("File non disponibile");
+    console.log("📁 [DOWNLOAD] File path:", filePath);
+
+    if (!fs.existsSync(filePath)) {
+      console.log("❌ [DOWNLOAD] File non disponibile");
+      return res.status(404).send("File non disponibile");
+    }
 
     res.setHeader("Content-Type", "application/octet-stream");
     res.setHeader(
@@ -215,19 +193,25 @@ router.get("/p2p/session/download/:sessionId", async (req, res) => {
     stream.pipe(res);
 
     stream.on("close", async () => {
+      console.log("📤 [DOWNLOAD] File inviato, aggiorno DB e cancello file");
+
       await updateSessionStatus(sessionId, "completed");
 
       await sendFcmToUser(session.from_user_id, {
         type: "file_downloaded",
         sessionId,
-        senderName: session.file_name,
-        route: "/download_center",
       });
 
-      try { fs.unlinkSync(filePath); } catch {}
+      try {
+        fs.unlinkSync(filePath);
+        console.log("🗑️ [DOWNLOAD] File eliminato dal server");
+      } catch (e) {
+        console.log("⚠️ [DOWNLOAD] Errore eliminazione file:", e);
+      }
     });
 
   } catch (err) {
+    console.error("❌ [DOWNLOAD] Errore:", err);
     return res.status(500).send("Errore interno");
   }
 });
