@@ -4,7 +4,6 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import multer from "multer";
-import { fileURLToPath } from "url";
 import pool from "./db.js";
 import { sendFCM } from "./firebase-config.js";
 
@@ -110,82 +109,96 @@ router.post("/p2p/session/init", async (req, res) => {
 1) UPLOAD FILE SU DISCO + CHECK AUTOMATICO
    (flusso A: file su server, niente P2P)
 --------------------------------------------------------- */
-router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req, res) => {
-  console.log("📩 [HTTP] /p2p/session/create", req.params, req.body);
+router.post(
+  "/p2p/session/create/:sessionId",
+  upload.single("file"),
+  async (req, res) => {
+    console.log("📩 [HTTP] /p2p/session/create", req.params, req.body);
 
-  try {
-    const { sessionId } = req.params;
-    const { from_user_id, to_user_id, fileSize, fileType, fileName } = req.body;
+    try {
+      const { sessionId } = req.params;
+      const { from_user_id, to_user_id, fileSize, fileType, fileName } = req.body;
 
-    if (!req.file) {
-      console.log("❌ [UPLOAD] Nessun file ricevuto da Multer");
-      return res.status(400).json({ error: "File mancante" });
-    }
-
-    console.log("📦 [UPLOAD] File salvato:", req.file.path);
-
-    const realSize = fs.statSync(req.file.path).size;
-    console.log("📏 [UPLOAD] Dimensione reale file:", realSize);
-
-    // 🔍 CHECK AUTOMATICO DOPO 1 SECONDO
-    setTimeout(() => {
-      try {
-        const filePath = req.file.path;
-        console.log("⏳ [CHECK] Controllo file dopo upload:", filePath);
-
-        if (!fs.existsSync(filePath)) {
-          console.log("❌ [CHECK] File NON esiste dopo 1 secondo!");
-          console.log("⚠️ [CHECK] Railway potrebbe aver resettato il container.");
-          return;
-        }
-
-        const stats = fs.statSync(filePath);
-
-        console.log("✅ [CHECK] File presente!");
-        console.log("📏 [CHECK] Dimensione attuale:", stats.size, "bytes");
-        console.log("📁 [CHECK] Percorso:", filePath);
-        console.log("🕒 [CHECK] Ultima modifica:", stats.mtime);
-
-      } catch (err) {
-        console.log("❌ [CHECK] Errore durante la verifica:", err);
+      if (!req.file) {
+        console.log("❌ [UPLOAD] Nessun file ricevuto da Multer");
+        return res.status(400).json({ error: "File mancante" });
       }
-    }, 1000);
 
-    const result = await pool.query(
-      `UPDATE p2p_sessions
-       SET file_size=$1, file_type=$2, file_name=$3, status='uploaded', updated_at=NOW()
-       WHERE session_id=$4
-       RETURNING *`,
-      [fileSize, fileType, fileName ?? "", sessionId]
-    );
+      console.log("📦 [UPLOAD] File salvato:", req.file.path);
 
-    console.log("📝 [DB] Sessione aggiornata:", result.rows[0]);
+      const realSize = fs.statSync(req.file.path).size;
+      console.log("📏 [UPLOAD] Dimensione reale file:", realSize);
 
-    // 🔥 FLUSSO A (APP CHIUSA / SERVER): invio SOLO file_ready_for_download
-    await sendFcmToUser(to_user_id, {
-      type: "file_ready_for_download",
-      sessionId,
-      fileName: fileName ?? "file",
-      fileType,
-      fileSize: String(fileSize),
-      downloadUrl: `/p2p/session/download/${sessionId}`,
-    });
-    
-    senderId: String(sessionData.from_user_id), // Passa l'ID reale del mittente
-    senderName: "WinkWink User" // Puoi recuperare il nome reale dal DB o lasciare una stringa fissa
-    console.log("📡 [UPLOAD] FCM file_ready_for_download inviato");
+      // 🔍 CHECK AUTOMATICO DOPO 1 SECONDO
+      setTimeout(() => {
+        try {
+          const filePath = req.file.path;
+          console.log("⏳ [CHECK] Controllo file dopo upload:", filePath);
 
-    return res.json({
-      session: result.rows[0],
-      delivered: "fcm",
-      status: "file_stored_on_server",
-    });
+          if (!fs.existsSync(filePath)) {
+            console.log("❌ [CHECK] File NON esiste dopo 1 secondo!");
+            console.log("⚠️ [CHECK] Railway potrebbe aver resettato il container.");
+            return;
+          }
 
-  } catch (err) {
-    console.error("❌ [UPLOAD] Errore:", err);
-    return res.status(500).json({ error: err.message });
+          const stats = fs.statSync(filePath);
+
+          console.log("✅ [CHECK] File presente!");
+          console.log("📏 [CHECK] Dimensione attuale:", stats.size, "bytes");
+          console.log("📁 [CHECK] Percorso:", filePath);
+          console.log("🕒 [CHECK] Ultima modifica:", stats.mtime);
+        } catch (err) {
+          console.log("❌ [CHECK] Errore durante la verifica:", err);
+        }
+      }, 1000);
+
+      const result = await pool.query(
+        `UPDATE p2p_sessions
+         SET file_size=$1, file_type=$2, file_name=$3, status='uploaded', updated_at=NOW()
+         WHERE session_id=$4
+         RETURNING *`,
+        [fileSize, fileType, fileName ?? "", sessionId]
+      );
+
+      const sessionData = result.rows[0];
+      console.log("📝 [DB] Sessione aggiornata:", sessionData);
+
+      // 🔍 Recupero informazioni sul mittente
+      const senderRes = await pool.query(
+        "SELECT id, name FROM users WHERE id = $1",
+        [sessionData.from_user_id]
+      );
+
+      const sender = senderRes.rows[0] || {
+        id: sessionData.from_user_id,
+        name: "WinkWink User",
+      };
+
+      // 🔥 Invio FCM al destinatario
+      await sendFcmToUser(to_user_id, {
+        type: "file_ready_for_download",
+        sessionId,
+        fileName: fileName ?? "file",
+        fileType,
+        fileSize: String(fileSize),
+        downloadUrl: `/p2p/session/download/${sessionId}`,
+        senderId: String(sender.id),
+        senderName: sender.name,
+      });
+
+      console.log("📡 [UPLOAD] FCM file_ready_for_download inviato");
+
+      return res.json({
+        session: sessionData,
+        delivered: "fcm",
+        status: "file_stored_on_server",
+      });
+    } catch (err) {
+      console.error("❌ [UPLOAD] Errore:", err);
+      return res.status(500).json({ error: err.message });
+    }
   }
-});
+);
 
 /* ---------------------------------------------------------
 4) DOWNLOAD FILE
@@ -232,7 +245,6 @@ router.get("/p2p/session/download/:sessionId", async (req, res) => {
 
       console.log("📡 [DOWNLOAD] FCM file_downloaded inviato");
     });
-
   } catch (err) {
     console.error("❌ [DOWNLOAD] Errore:", err);
     return res.status(500).send("Errore interno");
