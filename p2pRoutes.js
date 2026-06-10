@@ -1,4 +1,4 @@
-// p2pRoutes.js — VERSIONE FINALE CON CHECK AUTOMATICO POST-UPLOAD
+// p2pRoutes.js — VERSIONE FINALE (flusso A: server-only)
 import express from "express";
 import fs from "fs";
 import path from "path";
@@ -108,6 +108,7 @@ router.post("/p2p/session/init", async (req, res) => {
 
 /* ---------------------------------------------------------
 1) UPLOAD FILE SU DISCO + CHECK AUTOMATICO
+   (flusso A: file su server, niente P2P)
 --------------------------------------------------------- */
 router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req, res) => {
   console.log("📩 [HTTP] /p2p/session/create", req.params, req.body);
@@ -160,19 +161,7 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
 
     console.log("📝 [DB] Sessione aggiornata:", result.rows[0]);
 
-    // Notifica ricevente
-    await sendFcmToUser(to_user_id, {
-      type: "incoming_file",
-      sessionId,
-      senderId: String(from_user_id),
-      fileName: fileName ?? "file",
-      fileType,
-      fileSize: String(fileSize),
-    });
-
-    console.log("📡 [UPLOAD] FCM incoming_file inviato");
-
-    // Notifica link pronto
+    // 🔥 FLUSSO A (APP CHIUSA / SERVER): invio SOLO file_ready_for_download
     await sendFcmToUser(to_user_id, {
       type: "file_ready_for_download",
       sessionId,

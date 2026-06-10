@@ -72,6 +72,8 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
         );
 
         // 1️⃣ Notifica iniziale
+        // FLUSSO B (APP APERTA → P2P)
+        // Invia SOLO incoming_file
         await sendFcmToUser(to_user_id, {
             type: "incoming_file",
             sessionId,
@@ -81,15 +83,6 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
             fileSize: String(fileSize)
         });
 
-        // ⭐⭐⭐ PATCH: Notifica con link pronto ⭐⭐⭐
-        await sendFcmToUser(to_user_id, {
-            type: "file_ready_for_download",
-            sessionId,
-            fileName: fileName ?? "file",
-            fileType,
-            fileSize: String(fileSize),
-            downloadUrl: `/p2p/session/download/${sessionId}`
-        });
 
         return res.json({
             session: result.rows[0],
