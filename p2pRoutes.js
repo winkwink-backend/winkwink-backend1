@@ -170,7 +170,9 @@ router.post("/p2p/session/create/:sessionId", upload.single("file"), async (req,
       fileSize: String(fileSize),
       downloadUrl: `/p2p/session/download/${sessionId}`,
     });
-
+    
+    senderId: String(sessionData.from_user_id), // Passa l'ID reale del mittente
+    senderName: "WinkWink User" // Puoi recuperare il nome reale dal DB o lasciare una stringa fissa
     console.log("📡 [UPLOAD] FCM file_ready_for_download inviato");
 
     return res.json({
