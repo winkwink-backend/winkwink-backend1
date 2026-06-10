@@ -1,3 +1,5 @@
+// socketHandlers.js (SOLO CHAT)
+
 import { sendFCM } from "./firebase-config.js";
 
 export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms) => {
@@ -10,7 +12,7 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
   });
 
   // ============================================================
-  // PRESENZA (CHAT + P2P)
+  // PRESENZA (solo chat)
   // ============================================================
   socket.on("register", (userId) => {
     socket.userId = String(userId);
@@ -18,7 +20,7 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
     io.emit("user_online", { userId });
   });
 
-  socket.on("disconnect", (reason) => {
+  socket.on("disconnect", () => {
     if (socket.userId) {
       onlineUsers.delete(socket.userId);
       io.emit("user_offline", { userId: socket.userId });
@@ -45,6 +47,9 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
     socket.leave(`chat_${chat_id}`);
   });
 
+  // ============================================================
+  // INVIO MESSAGGI CHAT
+  // ============================================================
   socket.on("send_message", async (data) => {
     try {
       // DELETE
@@ -86,7 +91,7 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
   });
 
   // ============================================================
-  // SIGNALING WEBRTC (solo chat/video)
+  // SIGNALING WEBRTC SOLO PER VIDEOCHAT (NON FILE)
   // ============================================================
   socket.on("offer", ({ toUserId, offer }) => {
     const target = onlineUsers.get(String(toUserId));
@@ -103,109 +108,4 @@ export const registerSocketHandlers = (io, socket, pool, onlineUsers, chatRooms)
     if (target) io.to(target).emit("ice_candidate", { from: socket.userId, candidate });
   });
 
-  // ============================================================
-  // ⭐ P2P WEBRTC (APP APERTA) — AGGIUNTO QUI
-  // ============================================================
-
-  // Alias compatibilità Flutter
-  const alias = (from, to) => {
-    socket.on(from, (data) => socket.emit(to, data));
-  };
-
-  alias("file_create_session", "p2p_create_session");
-  alias("file_accept", "p2p_accept");
-  alias("file_reject", "p2p_reject");
-  alias("file_webrtc_offer", "p2p_webrtc_offer");
-  alias("file_webrtc_answer", "p2p_webrtc_answer");
-  alias("file_webrtc_ice_candidate", "p2p_webrtc_ice");
-
-  // Registrazione P2P
-  socket.on("register_p2p", ({ userId }) => {
-    onlineUsers.set(String(userId), socket.id);
-    socket.userId = String(userId);
-  });
-
-  // CREATE SESSION
-  socket.on("p2p_create_session", (data) => {
-    const { sessionId, toUserId, fileName, fileType, fileSize } = data;
-    const target = onlineUsers.get(String(toUserId));
-
-    if (!target) {
-      socket.emit("p2p_fallback_http", { sessionId });
-      return;
-    }
-
-    io.to(target).emit("p2p_incoming", {
-      sessionId,
-      fromUserId: socket.userId,
-      fileName,
-      fileType,
-      fileSize
-    });
-  });
-
-  // ACCEPT
-  socket.on("p2p_accept", ({ sessionId, fromUserId }) => {
-    const target = onlineUsers.get(String(fromUserId));
-    if (target) {
-      io.to(target).emit("p2p_accept", {
-        sessionId,
-        toUserId: socket.userId
-      });
-    }
-  });
-
-  // REJECT
-  socket.on("p2p_reject", ({ sessionId, fromUserId }) => {
-    const target = onlineUsers.get(String(fromUserId));
-    if (target) {
-      io.to(target).emit("p2p_reject", {
-        sessionId,
-        toUserId: socket.userId
-      });
-    }
-  });
-
-  // OFFER
-  socket.on("p2p_webrtc_offer", (data) => {
-    const { toUserId, sessionId, offer } = data;
-    const target = onlineUsers.get(String(toUserId));
-
-    if (!target) {
-      socket.emit("p2p_fallback_http", { sessionId });
-      return;
-    }
-
-    io.to(target).emit("p2p_webrtc_offer", {
-      sessionId,
-      fromUserId: socket.userId,
-      offer
-    });
-  });
-
-  // ANSWER
-  socket.on("p2p_webrtc_answer", (data) => {
-    const { toUserId, sessionId, answer } = data;
-    const target = onlineUsers.get(String(toUserId));
-    if (target) {
-      io.to(target).emit("p2p_webrtc_answer", {
-        sessionId,
-        fromUserId: socket.userId,
-        answer
-      });
-    }
-  });
-
-  // ICE
-  socket.on("p2p_webrtc_ice", (data) => {
-    const { toUserId, sessionId, candidate } = data;
-    const target = onlineUsers.get(String(toUserId));
-    if (target) {
-      io.to(target).emit("p2p_webrtc_ice", {
-        sessionId,
-        fromUserId: socket.userId,
-        candidate
-      });
-    }
-  });
 };
