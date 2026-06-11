@@ -10,7 +10,8 @@ import pool from "./db.js";
 
 import authRoutes from "./authRoutes.js";
 import chatRoutes from "./chatRoutes.js";
-import filesRoutes from "./filesRoutes.js";   // ⭐ nuovo upload HTTP
+import filesRoutes from "./fileRoutes.js";
+
 
 import { registerSocketHandlers } from "./socketHandlers.js"; // ⭐ solo chat + presenza
 
