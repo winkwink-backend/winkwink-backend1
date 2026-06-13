@@ -1,125 +1,159 @@
 import express from "express";
+import multer from "multer";
+import path from "path";
 import pool from "./db.js";
 import { sendFCM } from "./firebase-config.js";
 
 const router = express.Router();
 
-// ---------------------------------------------------------
-// ⭐ ACCETTAZIONE FILE VIA HTTP (PATCH COMPLETA)
-// ---------------------------------------------------------
-router.post("/file_accept_http", async (req, res) => {
-  const { sessionId, userId } = req.body;
+// ======================================================
+// 📁 CONFIGURAZIONE MULTER (upload su /uploads)
+// ======================================================
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/");
+  },
+  filename: (req, file, cb) => {
+    const unique = Date.now() + "_" + Math.floor(Math.random() * 999999);
+    cb(null, unique + path.extname(file.originalname));
+  },
+});
 
-  console.log(`📩 [HTTP POST] Accettazione ricevuta → sessionId=${sessionId}, userId=${userId}`);
+const upload = multer({ storage });
 
-  if (!sessionId || !userId) {
-    console.error("❌ Parametri mancanti");
-    return res.status(400).json({ error: "Parametri sessionId o userId mancanti" });
-  }
-
+// ======================================================
+// ⭐ UPLOAD HTTP — FLUSSO UFFICIALE 2026
+// ======================================================
+router.post("/upload", upload.single("file"), async (req, res) => {
   try {
-    // 1️⃣ Recupero sessione
-    const result = await pool.query(
-      "SELECT * FROM p2p_sessions WHERE session_id = $1",
-      [sessionId]
+    const {
+      from_user_id,
+      to_user_id,
+      fileType,
+      fileSize,
+      fileName,
+    } = req.body;
+
+    if (!req.file) {
+      return res.status(400).json({ error: "File mancante" });
+    }
+
+    if (!from_user_id || !to_user_id || !fileType || !fileName) {
+      return res.status(400).json({ error: "Parametri mancanti" });
+    }
+
+    const savedFileName = req.file.filename;
+    const downloadUrl = `${process.env.BASE_URL}/uploads/${savedFileName}`;
+
+    console.log("📥 File ricevuto:", {
+      from_user_id,
+      to_user_id,
+      fileType,
+      fileSize,
+      fileName,
+      savedFileName,
+      downloadUrl,
+    });
+
+    // ======================================================
+    // 1️⃣ Salva pending file nel DB
+    // ======================================================
+    await pool.query(
+      `
+      INSERT INTO pending_files 
+      (from_user_id, to_user_id, file_name, file_type, file_size, download_url, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      `,
+      [
+        from_user_id,
+        to_user_id,
+        fileName,
+        fileType,
+        fileSize || 0,
+        downloadUrl,
+      ]
     );
 
-    if (result.rows.length === 0) {
-      console.log("❌ Nessuna sessione trovata nel DB");
-      return res.status(404).json({ error: "Session not found" });
-    }
+    // ======================================================
+    // 2️⃣ Recupera token FCM del destinatario
+    // ======================================================
+    const tokenRes = await pool.query(
+      "SELECT fcm_token FROM users WHERE id = $1",
+      [to_user_id]
+    );
 
-    const session = result.rows[0];
-    const senderId = session.from_user_id;
-    const receiverId = session.to_user_id;
+    const token = tokenRes.rows[0]?.fcm_token;
 
-    console.log("📦 Sessione trovata:", session);
+    // ======================================================
+    // 3️⃣ Invia PUSH SILENZIOSA al destinatario
+    // ======================================================
+    if (token) {
+      console.log("📡 Invio push silenziosa al destinatario...");
 
-    // 2️⃣ Recupero socket del mittente
-    const senderSocketId = req.app.get("onlineUsers").get(String(senderId));
-
-    // 3️⃣ Payload da inviare al mittente
-    const payload = {
-      sessionId,
-      fileName: session.file_name,
-      fileType: session.file_type,
-      fileSize: session.file_size,
-      receiverId
-    };
-
-    // 4️⃣ Mittente ONLINE → WebSocket
-    if (senderSocketId) {
-      console.log("📡 Mittente online → invio start_sending_file via WS");
-      req.app.get("io").to(senderSocketId).emit("start_sending_file", payload);
+      await sendFCM({
+        token,
+        data: {
+          type: "new_pending_file",
+          fileName,
+          fileType,
+          fileSize: String(fileSize || 0),
+          downloadUrl,
+          fromUserId: String(from_user_id),
+        },
+      });
     } else {
-      // 5️⃣ Mittente OFFLINE → FCM
-      console.log("📵 Mittente offline → invio FCM start_sending_file");
-
-      const tokenRes = await pool.query(
-        "SELECT fcm_token FROM users WHERE id = $1",
-        [senderId]
-      );
-
-      const token = tokenRes.rows[0]?.fcm_token;
-
-      if (token) {
-        await sendFCM({
-          token,
-          data: {
-            type: "start_sending_file",
-            ...Object.fromEntries(
-              Object.entries(payload).map(([k, v]) => [k, String(v)])
-            )
-          }
-        });
-      } else {
-        console.log("⚠️ Nessun token FCM per il mittente");
-      }
+      console.log("⚠️ Nessun token FCM per il destinatario");
     }
 
-    // 6️⃣ Risposta HTTP
-    console.log("✅ Accettazione gestita correttamente");
-    res.status(200).json({
+    // ======================================================
+    // 4️⃣ Risposta HTTP
+    // ======================================================
+    res.json({
       success: true,
-      message: "Accettazione elaborata",
-      sessionId,
-      senderId,
-      receiverId
+      downloadUrl,
     });
 
   } catch (err) {
-    console.error("❌ Errore nel file_accept_http:", err.message);
+    console.error("❌ Errore upload:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ---------------------------------------------------------
-// Recupera cronologia file ricevuti/inviati
-// ---------------------------------------------------------
-router.get("/files/history/:userId", async (req, res) => {
+// ======================================================
+// ⭐ Recupera pending files per un utente
+// ======================================================
+router.get("/pending/:userId", async (req, res) => {
   const { userId } = req.params;
+
   try {
     const result = await pool.query(
-      "SELECT * FROM p2p_sessions WHERE from_user_id = $1 OR to_user_id = $1 ORDER BY created_at DESC",
+      `
+      SELECT * FROM pending_files
+      WHERE to_user_id = $1
+      ORDER BY created_at DESC
+      `,
       [userId]
     );
+
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ---------------------------------------------------------
-// Ricerca utenti per nome o email
-// ---------------------------------------------------------
-router.get("/users/search", async (req, res) => {
-  const { query } = req.query;
+// ======================================================
+// ⭐ Svuota pending files (dopo download)
+// ======================================================
+router.post("/pending/clear", async (req, res) => {
+  const { userId } = req.body;
+
   try {
-    const result = await pool.query(
-      "SELECT id, name, email FROM users WHERE name ILIKE $1 OR email ILIKE $1 LIMIT 10",
-      [`%${query}%`]
+    await pool.query(
+      "DELETE FROM pending_files WHERE to_user_id = $1",
+      [userId]
     );
-    res.json(result.rows);
+
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

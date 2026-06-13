@@ -1,24 +1,58 @@
-# Node dependencies
+# ============================
+# NODE / BACKEND IGNORE
+# ============================
+
+# Node modules
 node_modules/
 
-# Environment variables
-.env
-
-# Uploaded files (mai su GitHub)
-uploads/
-
-# File criptati generati dal sistema
-*.enc
-
-# Chiave privata Firebase Admin (MAI su GitHub)
-winkwink-app-firebase-adminsdk-*.json
-
-# Log vari
+# Logs
+logs/
 *.log
-
-# Cache e build
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Environment variables
+.env
 
+# Build / temp
+dist/
+tmp/
+temp/
+
+# ============================
+# FIREBASE / SECRETS
+# ============================
+
+# Firebase Admin SDK JSON (segreti)
+winkwink-app-firebase-adminsdk-*.json
+
+# Config Firebase locale (NON deve andare su GitHub)
+firebase-config.js
+
+# Qualsiasi altro JSON sensibile
+*.json
+!package.json
+!package-lock.json
+
+# ============================
+# UPLOADS / FILES TEMPORANEI
+# ============================
+
+uploads/
+ffmpeg/
+
+# ============================
+# OS / EDITOR FILES
+# ============================
+
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ============================
+# GIT
+# ============================
+
+.git/
