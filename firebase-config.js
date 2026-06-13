@@ -15,7 +15,7 @@ if (process.env.FIREBASE_CONFIG) {
 
 // 2. Se la variabile non esiste, prova i percorsi dei file fisici (Locale o Render)
 if (!serviceAccount) {
-  const localPath = "./winkwink-app-firebase-adminsdk-fbsvc-dad5fdd635.json";
+  const localPath = "./winkwink-app-firebase-adminsdk-fbsvc-9d33aa6410.json";
   const renderSecretPath = "/etc/secrets/firebase-key.json";
 
   if (fs.existsSync(localPath)) {
